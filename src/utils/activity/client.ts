@@ -13,6 +13,12 @@ async function post<T>(url: string, body: unknown, timeoutMs: number): Promise<T
 /** Asks the local server to read this day's activity from the listed folders. */
 export const scanActivityApi = (req: ScanRequest): Promise<ScanResponse> => post<ScanResponse>('/api/activity/scan', req, ACTIVITY_SCAN_TIMEOUT_MS);
 
+/** The git projects in a folder (itself and the ones one level below), for automatic projects. */
+export async function discoverReposApi(folder: string): Promise<string[]> {
+  const r = await requestJson<{ repos: string[] }>('/api/activity/discover', { method: 'POST', body: { path: folder }, timeoutMs: 20_000 });
+  return r.ok && Array.isArray(r.data.repos) ? r.data.repos : [];
+}
+
 /** Asks the server to group the items into tasks with Gemini. `tasks: null` means "use plain wording". */
 export const suggestTasksApi = (args: {
   items: ActivityItem[];

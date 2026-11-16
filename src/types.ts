@@ -115,6 +115,12 @@ export interface AppSettings {
   activityUseCodex?: boolean;
   // Document files worked on (names and times only): on unless set to false.
   activityUseDocs?: boolean;
+  // Projects are created from the folders you work in. Absent = on.
+  activityAutoProjects?: boolean;
+  // The folder that holds your projects. Absent: the common parent of the linked folders.
+  activityWatchFolder?: string;
+  // Folders the automatic projects skip (a project deleted for good adds its folder here).
+  activityIgnoredFolders?: string[];
   // Which AI groups the activity into suggestions. Absent = Claude Code.
   activityAi?: ActivityAi;
   // The project last used when a task or log was submitted from Today's inputs or Plan your day. Absent = first active project.

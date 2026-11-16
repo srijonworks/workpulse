@@ -90,6 +90,7 @@ import { OfflineNotice } from './components/OfflineNotice';
 import { SaveStatusBanner } from './components/SaveStatusBanner';
 import { DiskCopyBanner } from './components/DiskCopyBanner';
 import { useHeartbeat } from './hooks/useHeartbeat';
+import { useAutoProjects } from './hooks/useAutoProjects';
 import { writeHeartbeat } from './utils/heartbeat';
 import { desktopBridge } from './utils/desktopBridge';
 import { recordRepairs, repairData } from './utils/dataDoctor';
@@ -1056,7 +1057,12 @@ export default function App() {
     setProjects(out.projects);
     saveProjects(out.projects);
     if (out.folders.length !== (settingsRef.current.activityFolders ?? []).length) {
-      updateSettings({ activityFolders: out.folders.length > 0 ? out.folders : undefined });
+      // The folders of a project deleted for good are not made into a project again by the automatic projects.
+      const removed = (settingsRef.current.activityFolders ?? []).filter((f) => !out.folders.some((o) => o.path === f.path)).map((f) => f.path);
+      updateSettings({
+        activityFolders: out.folders.length > 0 ? out.folders : undefined,
+        activityIgnoredFolders: [...(settingsRef.current.activityIgnoredFolders ?? []), ...removed],
+      });
     }
     addToast('Project deleted for good. Its tasks and logs are untouched.');
   };
@@ -1347,6 +1353,13 @@ export default function App() {
   const diskCopyState = useDiskCopyState();
   // "Alive now" every 30 s: after a shutdown it says when the PC was last in use (the automatic day uses it later).
   useHeartbeat(dataLoaded);
+  // Projects appear on their own from the folders you work in (see hooks/useAutoProjects).
+  useAutoProjects({
+    enabled: dataLoaded,
+    settings,
+    addProject: (input) => handleAddProjectWithFolder(input),
+    onCreated: (m) => addToast(`${m} (made automatically from your work)`, 'info'),
+  });
   // The desktop shell is about to quit, sleep, lock or sign out: write everything held in memory, then say so.
   useEffect(() => {
     const bridge = desktopBridge();

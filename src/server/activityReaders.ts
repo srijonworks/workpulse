@@ -6,6 +6,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { localDayToUtcRange } from '../utils/activity/time';
 import { clip, redactSecrets } from '../utils/activity/sanitize';
+import { deepestFolder, isUnderFolder } from '../utils/activity/folderMatch';
 import { readCodexHistory } from './readCodex';
 import { readOpenCodeHistory } from './readOpenCode';
 import { readDocuments } from './readDocuments';
@@ -57,21 +58,7 @@ const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
 
 const norm = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 
-/** True when `cwd` is `folder` or inside it. Case-insensitive, slash-agnostic, separator-bounded. */
-export function isUnderFolder(cwd: string, folder: string): boolean {
-  const c = norm(cwd);
-  const f = norm(folder);
-  return c === f || c.startsWith(`${f}/`);
-}
-
-/** The listed folder that contains `cwd`; when listed folders nest, the deepest one. */
-export function deepestFolder(cwd: string, folders: string[]): string | null {
-  let best: string | null = null;
-  for (const f of folders) {
-    if (isUnderFolder(cwd, f) && (best === null || norm(f).length > norm(best).length)) best = f;
-  }
-  return best;
-}
+export { isUnderFolder, deepestFolder };
 
 const inRange = (iso: string, r: Range): boolean => {
   const t = Date.parse(iso);

@@ -18,7 +18,7 @@ import { cleanClientEntries, createLogBudget } from './src/server/clientLog';
 import { createFileLog } from './src/shell/fileLog';
 import { CLAUDE_MODEL_LABEL, claudeWriterGuard, eodViaClaude, standupViaClaude, writerFromRequest } from './src/server/aiWriter';
 import { createFolderPicker, isAllowedPickOrigin } from './src/server/folderPicker';
-import { scanActivity } from './src/server/activityReaders';
+import { findRepos, scanActivity } from './src/server/activityReaders';
 import { ACTIVITY_TASKS_SCHEMA, buildActivityPrompt, parseAiTasks } from './src/utils/activity/aiTasks';
 import { runClaudeJson } from './src/server/claudeCli';
 import { clip, redactSecrets } from './src/utils/activity/sanitize';
@@ -289,6 +289,16 @@ async function startServer() {
     const { status, body } = await call.result;
     if (res.writableEnded || res.destroyed) return;
     return res.status(status).json(body);
+  });
+
+  app.post('/api/activity/discover', activityGuard(HOST, PORT), async (req, res) => {
+    const p = req.body?.path;
+    if (typeof p !== 'string' || !path.isAbsolute(p)) return res.status(400).json({ error: 'Enter the full folder path.' });
+    try {
+      return res.json({ repos: (await findRepos([p])).slice(0, 100) });
+    } catch (err) {
+      return res.status(500).json({ error: describeRouteError(err) });
+    }
   });
 
   app.post('/api/activity/suggest', activityGuard(HOST, PORT), async (req, res) => {
