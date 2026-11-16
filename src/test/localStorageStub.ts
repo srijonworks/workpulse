@@ -1,4 +1,5 @@
 import { beforeEach } from 'vitest';
+import { resetStorageEngine } from '../utils/storage';
 
 // Minimal in-memory localStorage for the node test environment.
 class MemoryStorage {
@@ -25,4 +26,6 @@ class MemoryStorage {
 
 beforeEach(() => {
   (globalThis as any).localStorage = new MemoryStorage();
+  // The save engine keeps what it could not write, and which keys it blocked: a new test starts clean.
+  resetStorageEngine();
 });

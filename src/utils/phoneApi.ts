@@ -1,14 +1,19 @@
 import { plainSheetMessage } from './aiErrors';
+import { requestJson, type NetFailKind } from './net/http';
+import { scriptClientTimeoutMs } from './net/scriptTimeouts';
 import type { InboxItem, PhoneSnapshot } from './phoneSync';
 
 // Calls to the user's Google Apps Script through the local /api/sheets/proxy. The PIN and the token
-// travel only in the POST body, never in a URL.
+// travel only in the POST body, never in a URL. Every call has a time limit and always comes back as a
+// result with a plain sentence (see ./net/http); the proxy answers its own failures with a code.
 
 export interface PhoneApiResult<T = unknown> {
   ok: boolean;
   message: string;
   code?: string;
   data?: T;
+  /** Set on a failure that is worth trying again later (no connection, a busy Sheet, a timeout). */
+  retryable?: boolean;
 }
 
 const online = (): boolean => typeof navigator === 'undefined' || navigator.onLine !== false;
@@ -20,17 +25,29 @@ const CODE_MESSAGES: Record<string, string> = {
   locked: 'Too many wrong PINs. Try again in 15 minutes.',
   bad_request: 'The Sheet script did not understand the request. Update and redeploy the script.',
   bad_response: 'The Sheet script did not answer as expected. Update and redeploy the script.',
+  busy: 'The Sheet is busy with another request. WorkPulse will try again.',
+  timeout: 'The Sheet did not answer in time. WorkPulse will try again later.',
+  unreachable: 'WorkPulse could not reach Google from this computer. Check the internet connection, then try again.',
+  not_deployed: 'Google returned a web page instead of the script response. Deploy the script as a Web app with "Who has access" set to "Anyone", and check the URL ends in /exec.',
+  server_down: 'WorkPulse could not reach its server. Check that it is still running, then try again.',
 };
 
-function failure(raw: string | undefined, code?: string): PhoneApiResult<never> {
+// Codes that mean "not now": the same request can work later without anyone changing anything.
+const RETRYABLE_CODES = new Set(['busy', 'timeout', 'unreachable', 'server_down', 'proxy_error', 'google_error']);
+
+function failure(raw: string | undefined, code?: string, retryable?: boolean): PhoneApiResult<never> {
   // A message the script wrote itself is already a plain sentence; only technical text from the
   // network or the proxy goes through plainSheetMessage.
   const own = (raw || '').trim();
   const message = code ? own || CODE_MESSAGES[code] || plainSheetMessage('', online()) : plainSheetMessage(raw, online());
   const result: PhoneApiResult<never> = { ok: false, message: message.length > 200 ? `${message.slice(0, 197)}...` : message };
   if (code) result.code = code;
+  if (retryable || (code !== undefined && RETRYABLE_CODES.has(code))) result.retryable = true;
   return result;
 }
+
+// What the app says when the request itself failed and the server gave no code of its own.
+const KIND_CODES: Partial<Record<NetFailKind, string>> = { timeout: 'timeout', 'server-down': 'server_down', 'bad-response': 'bad_response' };
 
 async function call<T>(
   url: string,
@@ -41,29 +58,27 @@ async function call<T>(
   const scriptUrl = (url || '').trim();
   if (!scriptUrl) return failure('Google Apps Script Web App URL is not set in Settings.', 'no_url');
 
-  let res: Response;
-  try {
-    res = await fetch('/api/sheets/proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scriptUrl, action, method: 'POST', payload: { action, ...fields } }),
-    });
-  } catch (err: any) {
-    return failure(err?.message || 'Failed to fetch');
+  const r = await requestJson<unknown>('/api/sheets/proxy', {
+    method: 'POST',
+    body: { scriptUrl, action, method: 'POST', payload: { action, ...fields } },
+    timeoutMs: scriptClientTimeoutMs(action),
+  });
+
+  if (!r.ok) {
+    // The request itself failed (no answer from WorkPulse's server, too slow, a cancel): the code's plain sentence says it.
+    if (r.kind !== 'http') return failure(r.kind === 'aborted' ? r.message : undefined, KIND_CODES[r.kind], r.retryable);
+    // The proxy answers its own failures (Google unreachable, no answer in time, not deployed) with a code and a plain
+    // sentence. With a code, the code decides whether trying again can help; without one, the HTTP status does.
+    const said = (r.data && typeof r.data === 'object' ? r.data : {}) as { code?: unknown };
+    const code = typeof said.code === 'string' ? said.code : undefined;
+    return failure(r.message, code, code ? undefined : r.retryable);
   }
 
-  let body: any = null;
-  try {
-    body = await res.json();
-  } catch {
-    // not JSON: handled below
-  }
-  if (!body || typeof body !== 'object') {
-    return failure('The Sheet script did not answer. Check the script URL and that it is deployed for "Anyone".', 'bad_response');
-  }
-  if (res.ok && body.status === 'ok') return { ok: true, message: okMessage, data: body as T };
+  const body = r.data as { status?: unknown; code?: unknown; message?: unknown; error?: unknown } | null;
+  if (!body || typeof body !== 'object') return failure(undefined, 'bad_response');
+  if (body.status === 'ok') return { ok: true, message: okMessage, data: body as T };
   const code = typeof body.code === 'string' ? body.code : undefined;
-  return failure(body.message || body.error, code);
+  return failure((body.message || body.error) as string | undefined, code);
 }
 
 export function setPhonePin(
@@ -153,20 +168,38 @@ export function resetPhoneAccess(
   return call(url, 'resetAccess', { pin, newPin }, 'Phone access reset.');
 }
 
+/**
+ * What a ping of the script found. `unreachable` is a problem of the moment (no internet, Google slow, WorkPulse's own
+ * server busy): the version is unknown, not old. `not-workpulse` means something answered that is not WorkPulse's script
+ * (a wrong URL, or a script not shared with "Anyone").
+ */
+export type ScriptProbe =
+  | { kind: 'ok'; version: number }
+  | { kind: 'no-url' }
+  | { kind: 'unreachable'; message: string }
+  | { kind: 'not-workpulse'; message: string };
+
+export async function probeScript(url: string): Promise<ScriptProbe> {
+  const scriptUrl = (url || '').trim();
+  if (!scriptUrl) return { kind: 'no-url' };
+  const r = await requestJson<{ status?: unknown; version?: unknown }>('/api/sheets/proxy', {
+    method: 'POST',
+    body: { scriptUrl, action: 'ping', method: 'GET' },
+    timeoutMs: scriptClientTimeoutMs('ping'),
+  });
+  if (r.ok) {
+    const body = r.data;
+    if (body && typeof body === 'object' && body.status === 'ok') return { kind: 'ok', version: typeof body.version === 'number' ? body.version : 1 };
+    return { kind: 'not-workpulse', message: CODE_MESSAGES.not_deployed };
+  }
+  const said = (r.data && typeof r.data === 'object' ? r.data : {}) as { code?: unknown };
+  if (said.code === 'not_deployed') return { kind: 'not-workpulse', message: r.message };
+  // Anything else that failed (no connection, a timeout, WorkPulse's own server) is a problem of the moment.
+  return { kind: 'unreachable', message: r.message };
+}
+
 // The script's version from its ping, or null when it cannot be reached or is not WorkPulse's script.
 export async function getScriptVersion(url: string): Promise<number | null> {
-  const scriptUrl = (url || '').trim();
-  if (!scriptUrl) return null;
-  try {
-    const res = await fetch('/api/sheets/proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scriptUrl, action: 'ping', method: 'GET' }),
-    });
-    const body = await res.json();
-    if (res.ok && body && body.status === 'ok') return typeof body.version === 'number' ? body.version : 1;
-    return null;
-  } catch {
-    return null;
-  }
+  const p = await probeScript(url);
+  return p.kind === 'ok' ? p.version : null;
 }

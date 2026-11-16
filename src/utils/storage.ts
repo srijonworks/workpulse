@@ -5,6 +5,7 @@ import { isWorkdays, validWorkdayHours } from './workday';
 import { ensureOpenSegment } from './segments';
 import { normalizeTheme } from './theme';
 import { getInitialSeedData, DEFAULT_SETTINGS } from '../data/seedData';
+import { createEngine, readMeta, type Engine, type KV, type SaveResult as EngineSaveResult } from './persist/engine';
 
 const KEYS = {
   LOGS: 'workpulse_logs',
@@ -18,7 +19,36 @@ const KEYS = {
 
 export const CURRENT_SCHEMA_VERSION = 1;
 
-export type SaveResult = { ok: true } | { ok: false; error: string };
+/** How the data keys are named to the user ("Your tasks could not be read"). */
+export const KEY_LABELS: Record<string, string> = {
+  [KEYS.LOGS]: 'work logs',
+  [KEYS.BACKLOG]: 'tasks',
+  [KEYS.PROJECTS]: 'projects',
+  [KEYS.TAGS]: 'tags',
+  [KEYS.SETTINGS]: 'settings',
+  [KEYS.WORKDAYS]: 'office clock records',
+};
+
+// A failed save keeps the value and is retried (see ./persist/engine); `kind` says why in the cases it knows.
+export type SaveResult = EngineSaveResult;
+
+// The browser's storage, looked up at every call (the tests swap globalThis.localStorage).
+const browserKV: KV = {
+  getItem: (k) => globalThis.localStorage.getItem(k),
+  setItem: (k, v) => globalThis.localStorage.setItem(k, v),
+  removeItem: (k) => globalThis.localStorage.removeItem(k),
+};
+
+let engine: Engine = createEngine({ kv: browserKV });
+
+/** Every write of the app's data goes through this engine; the screen reads its status ("Not saved", a blocked key). */
+export const getEngine = (): Engine => engine;
+
+/** For tests: forget everything the engine was holding. */
+export function resetStorageEngine(): Engine {
+  engine = createEngine({ kv: browserKV });
+  return engine;
+}
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -33,33 +63,45 @@ export const isStringArray = (v: unknown): v is string[] =>
   Array.isArray(v) && v.every((i) => typeof i === 'string');
 export const isSettingsObject = (v: unknown): v is Partial<AppSettings> => isObj(v);
 
-// Reads one key. Absent -> absentFallback (first run). Unreadable or wrong shape ->
-// the raw value is copied to "<key>_corrupt_<timestamp>" so nothing is lost, a warning is
-// recorded, and corruptFallback is returned (never demo data).
+// Reads one key. Absent -> absentFallback (first run). Unreadable, wrong shape, or missing although it was saved
+// before -> the raw value is copied to "<key>_corrupt_<timestamp>" so nothing is lost, a warning is recorded,
+// corruptFallback is returned (never demo data), and the engine BLOCKS the key: nothing is written to it until
+// the user restores it or chooses to start it empty, so the empty fallback can never replace real data.
 function readKey<T>(
   key: string,
   guard: (v: unknown) => v is T,
   absentFallback: T,
   corruptFallback: T,
   warnings: string[],
+  known: ReadonlySet<string>,
 ): T {
   let raw: string | null;
   try {
-    raw = localStorage.getItem(key);
+    raw = browserKV.getItem(key);
   } catch {
     warnings.push(`Could not read "${key}" from browser storage.`);
+    engine.block(key);
     return corruptFallback;
   }
-  if (raw === null) return absentFallback;
+  if (raw === null) {
+    if (known.has(key)) {
+      // Saved before and gone now: something removed it. Demo data must not stand in for it.
+      warnings.push(`"${key}" is missing from this browser's storage. WorkPulse is not changing it until you restore your data.`);
+      engine.block(key);
+      return corruptFallback;
+    }
+    return absentFallback;
+  }
   try {
     const parsed: unknown = JSON.parse(raw);
     if (guard(parsed)) return parsed;
   } catch {
     // fall through to quarantine
   }
+  engine.block(key);
   const backupKey = `${key}_corrupt_${Date.now()}`;
   try {
-    localStorage.setItem(backupKey, raw);
+    browserKV.setItem(backupKey, raw);
     warnings.push(`"${key}" was unreadable. A copy was kept as "${backupKey}"; the app started with an empty list.`);
   } catch {
     warnings.push(`"${key}" was unreadable and could not be backed up (storage full).`);
@@ -107,16 +149,22 @@ export function loadStoredData() {
   const seed = getInitialSeedData();
   const warnings: string[] = [];
 
-  const logs = readKey<WorkLog[]>(KEYS.LOGS, isLogArray, seed.logs, [], warnings);
-  let backlog = readKey<BacklogTask[]>(KEYS.BACKLOG, isBacklogArray, seed.backlog, [], warnings);
-  const projects = readKey<Project[]>(KEYS.PROJECTS, isProjectArray, seed.projects, [], warnings);
-  const tags = readKey<string[]>(KEYS.TAGS, isStringArray, seed.tags, [], warnings);
+  // The identity record says which keys have been saved here before, so a key that has vanished is noticed.
+  const meta = readMeta(browserKV);
+  if (meta) engine.adopt(meta);
+  const known = new Set(meta?.keys ?? []);
+
+  const logs = readKey<WorkLog[]>(KEYS.LOGS, isLogArray, seed.logs, [], warnings, known);
+  let backlog = readKey<BacklogTask[]>(KEYS.BACKLOG, isBacklogArray, seed.backlog, [], warnings, known);
+  const projects = readKey<Project[]>(KEYS.PROJECTS, isProjectArray, seed.projects, [], warnings, known);
+  const tags = readKey<string[]>(KEYS.TAGS, isStringArray, seed.tags, [], warnings, known);
   const storedSettings = readKey<Partial<AppSettings> | null>(
     KEYS.SETTINGS,
     (v): v is Partial<AppSettings> | null => isSettingsObject(v),
     null,
     null,
     warnings,
+    known,
   );
   const merged: AppSettings = { ...DEFAULT_SETTINGS, ...(storedSettings || {}) };
   // Old theme ids (modern, compact, minimalist, matrix) load as their v2 theme.
@@ -125,7 +173,7 @@ export function loadStoredData() {
     theme: normalizeTheme(merged.theme),
     workdayHours: validWorkdayHours(merged.workdayHours),
   };
-  const workdays = readKey<Workdays>(KEYS.WORKDAYS, isWorkdays, {}, {}, warnings);
+  const workdays = readKey<Workdays>(KEYS.WORKDAYS, isWorkdays, {}, {}, warnings, known);
 
   // Normalise tasks (pending ones keep their own day). A timer left running across midnight while the
   // app was closed belongs to today: it moves here, since the live midnight check never saw the change.
@@ -134,14 +182,12 @@ export function loadStoredData() {
   backlog = withRunningToday;
   const updatedBacklog = rolled.changed || withRunningToday !== rolled.tasks;
 
+  if (updatedBacklog) engine.save(KEYS.BACKLOG, backlog);
   try {
-    if (updatedBacklog) {
-      localStorage.setItem(KEYS.BACKLOG, JSON.stringify(backlog));
-    }
-    const storedVersion = Number(localStorage.getItem(KEYS.SCHEMA_VERSION) || 0);
+    const storedVersion = Number(browserKV.getItem(KEYS.SCHEMA_VERSION) || 0);
     if (storedVersion < CURRENT_SCHEMA_VERSION) {
       runMigrations(storedVersion);
-      localStorage.setItem(KEYS.SCHEMA_VERSION, String(CURRENT_SCHEMA_VERSION));
+      browserKV.setItem(KEYS.SCHEMA_VERSION, String(CURRENT_SCHEMA_VERSION));
     }
   } catch (e) {
     console.error('Failed to write storage metadata:', e);
@@ -150,26 +196,22 @@ export function loadStoredData() {
   return { logs, backlog, projects, tags, settings, workdays, warnings };
 }
 
-function saveKey(key: string, value: unknown, what: string): SaveResult {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-    return { ok: true };
-  } catch (e) {
-    console.error(`Error saving ${what}:`, e);
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
-}
+// Every save goes through the engine: a failure keeps the value and it is retried, and the result says why.
+const saveKey = (key: string, value: unknown): SaveResult => engine.save(key, value);
 
-export const saveLogs = (logs: WorkLog[]) => saveKey(KEYS.LOGS, logs, 'logs');
-export const saveBacklog = (backlog: BacklogTask[]) => saveKey(KEYS.BACKLOG, backlog, 'backlog');
-export const saveProjects = (projects: Project[]) => saveKey(KEYS.PROJECTS, projects, 'projects');
-export const saveTags = (tags: string[]) => saveKey(KEYS.TAGS, tags, 'tags');
-export const saveSettings = (settings: AppSettings) => saveKey(KEYS.SETTINGS, settings, 'settings');
-export const saveWorkdays = (workdays: Workdays) => saveKey(KEYS.WORKDAYS, workdays, 'workdays');
+export const saveLogs = (logs: WorkLog[]) => saveKey(KEYS.LOGS, logs);
+export const saveBacklog = (backlog: BacklogTask[]) => saveKey(KEYS.BACKLOG, backlog);
+export const saveProjects = (projects: Project[]) => saveKey(KEYS.PROJECTS, projects);
+export const saveTags = (tags: string[]) => saveKey(KEYS.TAGS, tags);
+export const saveSettings = (settings: AppSettings) => saveKey(KEYS.SETTINGS, settings);
+export const saveWorkdays = (workdays: Workdays) => saveKey(KEYS.WORKDAYS, workdays);
 
 // Replaces all data keys at once (backup import). Workdays are written only when the backup has
 // them; an older backup leaves the stored workdays alone. If any write fails, every key is
-// restored to its previous value so a failed import cannot leave a half-written state.
+// restored to its previous value so a failed import cannot leave a half-written state, and nothing
+// is kept for later (the caller tells the user the import failed). An import is the user's own
+// decision to replace everything, so keys that were blocked as unreadable are let go first, and
+// blocked again if the import fails.
 export function replaceAllData(d: BackupData): SaveResult {
   const entries: [string, unknown][] = [
     [KEYS.LOGS, d.logs],
@@ -179,19 +221,9 @@ export function replaceAllData(d: BackupData): SaveResult {
     [KEYS.SETTINGS, d.settings],
   ];
   if (d.workdays !== undefined) entries.push([KEYS.WORKDAYS, d.workdays]);
-  const previous = entries.map(([k]) => [k, localStorage.getItem(k)] as const);
-  try {
-    for (const [k, v] of entries) localStorage.setItem(k, JSON.stringify(v));
-    return { ok: true };
-  } catch (e) {
-    for (const [k, v] of previous) {
-      try {
-        if (v === null) localStorage.removeItem(k);
-        else localStorage.setItem(k, v);
-      } catch {
-        // best effort
-      }
-    }
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
+  const wasBlocked = entries.map(([k]) => k).filter((k) => engine.status().blockedKeys.includes(k));
+  for (const k of wasBlocked) engine.unblock(k, { discardPending: true });
+  const result = engine.trySave(entries);
+  if (!result.ok) for (const k of wasBlocked) engine.block(k);
+  return result;
 }

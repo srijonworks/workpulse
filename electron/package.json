@@ -6,8 +6,8 @@
   "main": "main.cjs",
   "private": true,
   "scripts": {
-    "dist": "electron-builder --win --config.electronDist=C:/Users/DELL/wp-electron --config.directories.output=C:/Users/DELL/wp-release",
-    "pack": "electron-builder --win --dir --config.electronDist=C:/Users/DELL/wp-electron --config.directories.output=C:/Users/DELL/wp-release"
+    "dist": "node ../scripts/electron-builder.mjs",
+    "pack": "node ../scripts/electron-builder.mjs --dir"
   },
   "devDependencies": {
     "electron": "^39.0.0",
@@ -20,8 +20,7 @@
       "output": "release"
     },
     "files": [
-      "main.cjs",
-      "preload.cjs",
+      "*.cjs",
       "app/**/*",
       "package.json"
     ],
@@ -44,5 +43,8 @@
   },
   "dependencies": {
     "electron-updater": "^6.6.2"
+  },
+  "allowScripts": {
+    "electron@39.8.10": true
   }
 }

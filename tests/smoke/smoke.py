@@ -90,6 +90,7 @@ SEL = {
     "theme_tiles": {"chase": "The Chase", "timecard": "Time Card", "console": "Graphite Console"},
     "workday_hours": "Hours in your workday",
     "settings_save": "Save All Settings",
+    "settings_nav": "Settings sections",
     "phone_section": "#settings-phone",                   # CSS: Settings > Phone & evening email
     "set_pin": "Set PIN", "change_pin": "Change PIN", "reset_access": "Reset phone access",
     "pin_new": "New PIN", "pin_again": "New PIN again", "phone_link": "Phone link",
@@ -348,6 +349,13 @@ class Session:
                 return
         raise AssertionError(f"no visible navigation for '{name}'")
 
+    def settings_section(self, label):
+        """Settings shows one section at a time: open Settings, then pick the section in its list (a row of links on a phone)."""
+        self.tab("settings")
+        nav = self.page.get_by_role("navigation", name=SEL["settings_nav"])
+        nav.get_by_role("link", name=label, exact=True).click()
+        self.page.wait_for_timeout(150)
+
     def set_theme(self, theme):
         self.tab("settings")
         group = self.page.get_by_role("radiogroup", name=SEL["theme_group"])
@@ -488,14 +496,14 @@ def legacy_theme_migrates(s):
 
 @check("office_day_hours")
 def office_day_hours(s):
-    s.tab("settings")
+    s.settings_section("Office day")
     field = s.page.get_by_role("spinbutton", name=SEL["workday_hours"])
     field.fill("7.5")
     btn(s.page, SEL["settings_save"]).first.click()
     s.page.wait_for_timeout(300)
     assert s.ls("workpulse_settings").get("workdayHours") == 7.5, "office-day hours not saved"
     s.reload()
-    s.tab("settings")
+    s.settings_section("Office day")
     expect(s.page.get_by_role("spinbutton", name=SEL["workday_hours"])).to_have_value("7.5")
     s.no_errors()
 
@@ -1018,6 +1026,151 @@ def offline_notice(s):
     s.no_errors()
 
 
+@check("not_saved_notice")
+def not_saved_notice(s):
+    """A save the browser refuses is kept, said out loud in a notice that stays (not a toast that fades), and written
+    when storage works again, by itself or with Try again."""
+    p = s.page
+    notice = p.get_by_test_id("save-status")
+    expect(notice).to_have_count(0)
+    # the browser says it is full for every write of the logs
+    p.evaluate("""() => {
+        const real = Storage.prototype.setItem;
+        window.__realSetItem = real;
+        Storage.prototype.setItem = function (k, v) {
+            if (window.__full && k === 'workpulse_logs') throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+            return real.call(this, k, v);
+        };
+        window.__full = true;
+    }""")
+    text = "Smoke: written while the browser is full"
+    quick_log(s, text)
+    expect(notice).to_contain_text("Not saved yet", timeout=3000)
+    expect(notice).to_contain_text("work logs")
+    assert not any(l["description"] == text for l in (s.ls("workpulse_logs") or [])), "the log reached storage although it was full"
+    p.wait_for_timeout(1500)
+    expect(notice).to_contain_text("Not saved yet")  # it stays; it does not fade like a toast
+    # storage works again: Try again writes the waiting log
+    p.evaluate("() => { window.__full = false; }")
+    p.get_by_role("button", name="Try again").click()
+    expect(notice).to_have_count(0, timeout=3000)
+    assert any(l["description"] == text for l in s.ls("workpulse_logs")), "the waiting log was not written after Try again"
+    s.no_errors()
+
+
+@check("unreadable_list_blocked")
+def unreadable_list_blocked(s):
+    """A list that cannot be read is never written over: the notice says so, a copy of the damaged value is kept, other
+    lists still save, and "Start tags empty" replaces it only when the user chooses."""
+    p = s.page
+    p.evaluate("() => localStorage.setItem('workpulse_tags', '{bad')")
+    s.reload()
+    notice = p.get_by_test_id("save-status")
+    expect(notice).to_contain_text("Your tags could not be read", timeout=3000)
+    quick_log(s, "Smoke: another list still saves")
+    assert any(l["description"] == "Smoke: another list still saves" for l in s.ls("workpulse_logs")), "other lists must still save"
+    raw = p.evaluate("() => localStorage.getItem('workpulse_tags')")
+    assert raw == "{bad", f"the damaged tags were written over: {raw!r}"
+    copies = p.evaluate("() => Object.keys(localStorage).filter(k => k.startsWith('workpulse_tags_corrupt_'))")
+    assert len(copies) == 1, f"expected one kept copy of the damaged tags, found {copies}"
+    btn(notice, "Start tags empty").click()
+    expect(notice).to_have_count(0, timeout=3000)
+    assert s.ls("workpulse_tags") == [], "tags were not replaced after the user chose to start empty"
+    s.no_errors()
+
+
+@check("second_window_read_only")
+def second_window_read_only(s):
+    """Two windows must not write over each other: the second one is read-only until the user takes over."""
+    p = s.page
+    quick_log(s, "Smoke: first window write")
+    assert not p.get_by_test_id("save-status").count(), "the first window must be free to write"
+    second = s.ctx.new_page()
+    second.goto(p.url)
+    second.wait_for_load_state("networkidle")
+    notice = second.get_by_test_id("save-status")
+    expect(notice).to_contain_text("open in another window", timeout=4000)
+    before = len(s.ls("workpulse_logs"))
+    box = second.get_by_role("combobox", name=SEL["log_quick_add"])
+    box.fill("Smoke: written in the read-only window")
+    box.press("Enter")
+    second.wait_for_timeout(400)
+    assert len(s.ls("workpulse_logs")) == before, "a read-only window wrote to storage"
+    # the first window still works
+    quick_log(s, "Smoke: first window still writes")
+    assert len(s.ls("workpulse_logs")) == before + 1
+    second.close()
+    s.no_errors()
+
+
+@check("error_boundary_isolates_screen")
+def error_boundary_isolates_screen(s):
+    """A screen that breaks shows a plain message and a way forward, the other screens keep working, and the data is
+    untouched. (?wpCrash=history breaks History on purpose; it only does anything in the development build.)"""
+    p = s.page
+    quick_log(s, "Smoke: data that must survive a broken screen")
+    before = s.ls("workpulse_logs")
+    p.goto(p.url.split("?")[0] + "?wpCrash=history")
+    p.wait_for_load_state("networkidle")
+    s.tab("history")
+    alert = p.get_by_role("alert").filter(has_text="This screen ran into a problem")
+    expect(alert).to_be_visible(timeout=3000)
+    expect(alert).to_contain_text("Your data is not affected")
+    # the header and the other screens still work
+    s.tab("today")
+    expect(p.get_by_role("combobox", name=SEL["log_quick_add"])).to_be_visible()
+    expect(alert).to_have_count(0)
+    # going back to the broken screen shows the message again, and Try again is offered
+    s.tab("history")
+    expect(alert).to_be_visible(timeout=3000)
+    expect(btn(alert, "Try again")).to_be_visible()
+    assert s.ls("workpulse_logs") == before, "a broken screen changed the saved logs"
+    p.on("console", lambda m: None)
+    s.errors = [e for e in s.errors if "Test crash requested" not in e and "The above error occurred" not in e]
+    s.no_errors()
+
+
+@check("error_boundary_dialog_over_page")
+def error_boundary_dialog_over_page(s):
+    """A dialog that breaks is replaced by a plain message over the page, and the app behind it keeps working."""
+    p = s.page
+    p.goto(p.url.split("?")[0] + "?wpCrash=dialog")
+    p.wait_for_load_state("networkidle")
+    box = p.get_by_role("alertdialog")
+    expect(box).to_be_visible(timeout=3000)
+    expect(box).to_contain_text("This window ran into a problem")
+    expect(btn(box, "Close")).to_be_visible()
+    expect(p.get_by_role("combobox", name=SEL["log_quick_add"])).to_be_attached()
+    s.errors = [e for e in s.errors if "Test crash requested" not in e and "The above error occurred" not in e]
+    s.no_errors()
+
+
+@check("error_boundary_root_no_loop")
+def error_boundary_root_no_loop(s):
+    """A crash of the whole app reloads the page once, and when it crashes again stays on a plain screen instead of
+    reloading for ever. The error is also sent to the server's log."""
+    p = s.page
+    navigations = []
+    p.on("framenavigated", lambda f: navigations.append(f.url) if f == p.main_frame else None)
+    logged = []
+    p.on("request", lambda r: logged.append(r.post_data or "") if "/api/client-log" in r.url else None)
+    p.goto(p.url.split("?")[0] + "?wpCrash=root")
+    p.wait_for_timeout(4000)
+    screen = p.get_by_role("alert").filter(has_text="WorkPulse ran into a problem")
+    expect(screen).to_be_visible(timeout=3000)
+    expect(btn(screen, "Reload WorkPulse")).to_be_visible()
+    # one reload at most after the first crash: the goto itself plus one reload
+    assert len(navigations) <= 3, f"the page kept reloading: {len(navigations)} navigations"
+    p.wait_for_timeout(2500)
+    again = len(navigations)
+    p.wait_for_timeout(2500)
+    assert len(navigations) == again, "the page is still reloading by itself"
+    # the crash reached the server's log request (batched every 5 s)
+    p.wait_for_timeout(2500)
+    assert any("ran into a problem" in body for body in logged), "the crash was not sent to the server's log"
+    s.errors = [e for e in s.errors if "Test crash requested" not in e and "The above error occurred" not in e]
+
+
 @check("sync_button")
 def sync_button(s):
     """With a Sheet linked, Today's log has a Sync button that sends the unsynced logs."""
@@ -1506,7 +1659,7 @@ def phone_email_settings(s):
     settings["googleScriptUrl"] = SCRIPT_URL
     s.set_ls("workpulse_settings", settings)
     s.reload()
-    s.tab("settings")
+    s.settings_section("Phone & evening email")
     sec = p.locator(SEL["phone_section"])
     sec.scroll_into_view_if_needed()
     expect(btn(sec, SEL["set_pin"], exact=True)).to_be_visible(timeout=5000)
@@ -1553,7 +1706,7 @@ def projects_with_folder_and_trash(s):
         route.fulfill(json={"path": state["path"]})
 
     p.route("**/api/pick-folder", pick)
-    s.tab("settings")
+    s.settings_section("Projects & tags")
     sec = p.locator("#settings-projects")
     sec.scroll_into_view_if_needed()
 
@@ -1617,7 +1770,7 @@ def projects_with_folder_and_trash(s):
     s.tab("today")
     options = p.get_by_label("Project", exact=True).first.locator("option").all_inner_texts()
     assert "HMIS" not in options and options, f"a trashed project is still in the quick-add list: {options}"
-    s.tab("settings")
+    s.settings_section("Projects & tags")
     sec = p.locator("#settings-projects")
     sec.scroll_into_view_if_needed()
     btn(sec, "Restore HMIS", exact=True).click()
@@ -1626,7 +1779,7 @@ def projects_with_folder_and_trash(s):
     assert len(folders()) == 1, "the folder link was lost in the Trash"
     s.tab("today")
     assert "HMIS" in p.get_by_label("Project", exact=True).first.locator("option").all_inner_texts(), "restored project is not offered"
-    s.tab("settings")
+    s.settings_section("Projects & tags")
     sec = p.locator("#settings-projects")
     sec.scroll_into_view_if_needed()
 
@@ -1656,7 +1809,7 @@ def phone_old_script(s):
     settings["googleScriptUrl"] = SCRIPT_URL
     s.set_ls("workpulse_settings", settings)
     s.reload()
-    s.tab("settings")
+    s.settings_section("Phone & evening email")
     sec = p.locator(SEL["phone_section"])
     sec.scroll_into_view_if_needed()
     expect(sec).to_contain_text("version 2", timeout=5000)
@@ -1702,7 +1855,7 @@ def sheet_backup(s):
     assert "Smoke second log" in stub.payloads("saveBackup")[-1]["backup"]
     assert (s.ls("workpulse_settings") or {}).get("sheetBackupAt", "") > "2026", "the copy time was not recorded"
 
-    s.tab("settings")
+    s.settings_section("Phone & evening email")
     sec = p.locator(SEL["phone_section"])
     sec.scroll_into_view_if_needed()
     status = sec.get_by_test_id("sheet-backup-status")
@@ -1744,7 +1897,7 @@ def sheet_backup_old_script(s):
     stub = ScriptStub(s, version=3)
     _link_phone(s)
     s.reload()
-    s.tab("settings")
+    s.settings_section("Phone & evening email")
     sec = p.locator(SEL["phone_section"])
     sec.scroll_into_view_if_needed()
     expect(sec).to_contain_text("Backing up all your data to the Sheet needs version 4", timeout=5000)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { plainAiMessage, plainSheetMessage } from './aiErrors';
+import { isTransientSheetText, plainAiMessage, plainSheetMessage } from './aiErrors';
 
 describe('plainAiMessage', () => {
   it('says offline first', () => {
@@ -27,5 +27,27 @@ describe('plainSheetMessage', () => {
     expect(plainSheetMessage('Failed to fetch', true)).toMatch(/could not reach/);
     expect(plainSheetMessage('HTTP 403', true)).toMatch(/refused/);
     expect(plainSheetMessage('', true)).toMatch(/did not accept/);
+  });
+  it('turns the raw errors of an older script into plain sentences', () => {
+    expect(plainSheetMessage('Exception: Lock timeout: another process was holding the lock for too long.', true)).toMatch(/busy with another request/);
+    expect(plainSheetMessage('Exception: Service invoked too many times for one day: urlfetch.', true)).toMatch(/Google had a problem/);
+    expect(plainSheetMessage('Exception: Service Spreadsheets failed while accessing document with id abc.', true)).toMatch(/Google had a problem/);
+    expect(plainSheetMessage('Exceeded maximum execution time', true)).toMatch(/Google had a problem/);
+    expect(plainSheetMessage('Authorization is required to perform that action.', true)).toMatch(/refused/);
+  });
+  it('never shows the Google document id or the exception name for those cases', () => {
+    const out = plainSheetMessage('Exception: Service Spreadsheets failed while accessing document with id 1AbCdEf', true);
+    expect(out).not.toMatch(/Exception|1AbCdEf/);
+  });
+});
+
+describe('isTransientSheetText', () => {
+  it('is true only for "not now" answers', () => {
+    expect(isTransientSheetText('Exception: Lock timeout: another process was holding the lock')).toBe(true);
+    expect(isTransientSheetText('Service invoked too many times')).toBe(true);
+    expect(isTransientSheetText('Exceeded maximum execution time')).toBe(true);
+    expect(isTransientSheetText('That PIN is not right.')).toBe(false);
+    expect(isTransientSheetText('')).toBe(false);
+    expect(isTransientSheetText(undefined)).toBe(false);
   });
 });

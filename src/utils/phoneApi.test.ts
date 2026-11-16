@@ -8,6 +8,7 @@ import {
   sendTestEmail,
   resetPhoneAccess,
   getScriptVersion,
+  probeScript,
   saveBackupToSheet,
   getBackupInfo,
   loadBackupFromSheet,
@@ -120,6 +121,87 @@ describe('phoneApi', () => {
     expect(await getScriptVersion(URL_)).toBeNull();
     stubFetch(() => Promise.reject(new Error('down')));
     expect(await getScriptVersion(URL_)).toBeNull();
+  });
+});
+
+describe('phoneApi: failures are plain, coded and marked retryable', () => {
+  it("passes the proxy's code and sentence on, and says the call is worth retrying (Google unreachable)", async () => {
+    stubFetch(() => reply({ status: 'error', code: 'unreachable', error: 'WorkPulse could not reach Google from this computer.' }, 502));
+    const r = await pullInbox(URL_, 't');
+    expect(r).toEqual({ ok: false, code: 'unreachable', message: 'WorkPulse could not reach Google from this computer.', retryable: true });
+  });
+  it('treats a Google web page (script not deployed for Anyone) as not retryable', async () => {
+    stubFetch(() => reply({ status: 'error', code: 'not_deployed', error: 'Google returned a web page instead of the script response.' }, 502));
+    const r = await pullInbox(URL_, 't');
+    expect(r.code).toBe('not_deployed');
+    expect(r.retryable).toBeUndefined();
+  });
+  it('gives up on a call that never answers, with a timeout code, instead of waiting forever', async () => {
+    vi.useFakeTimers();
+    stubFetch(() => new Promise(() => {}));
+    const run = pullInbox(URL_, 't');
+    await vi.advanceTimersByTimeAsync(41_000); // pullInbox's limit is the server's 35 s plus 5 s
+    const r = await run;
+    vi.useRealTimers();
+    expect(r).toMatchObject({ ok: false, code: 'timeout', retryable: true });
+    expect(r.message).toMatch(/did not answer in time/);
+  });
+  it('gives the backup calls a longer limit than a normal call', async () => {
+    vi.useFakeTimers();
+    stubFetch(() => new Promise(() => {}));
+    let settled = false;
+    const run = saveBackupToSheet(URL_, 't', 'x', { counts: { logs: 0, tasks: 0, projects: 0 }, exportedAt: 'x' }).then((r) => {
+      settled = true;
+      return r;
+    });
+    await vi.advanceTimersByTimeAsync(100_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(50_000); // 140 s server limit plus 5 s
+    expect((await run).code).toBe('timeout');
+    vi.useRealTimers();
+  });
+  it('marks a local-server failure as retryable with its own code', async () => {
+    stubFetch(() => Promise.reject(new TypeError('Failed to fetch')));
+    const r = await pullInbox(URL_, 't');
+    expect(r).toMatchObject({ ok: false, code: 'server_down', retryable: true });
+  });
+  it('does not mark a wrong PIN as retryable', async () => {
+    stubFetch(() => reply({ status: 'error', code: 'bad_pin' }));
+    expect((await setPhonePin(URL_, '1', {})).retryable).toBeUndefined();
+  });
+  it('treats a busy script (code busy from version 6) as retryable', async () => {
+    stubFetch(() => reply({ status: 'error', code: 'busy', message: 'The Sheet is busy.' }));
+    expect(await pullInbox(URL_, 't')).toMatchObject({ ok: false, code: 'busy', retryable: true });
+  });
+});
+
+describe('probeScript', () => {
+  it('reads the version of the script', async () => {
+    stubFetch(() => reply({ status: 'ok', version: 5 }));
+    expect(await probeScript(URL_)).toEqual({ kind: 'ok', version: 5 });
+  });
+  it('reads a script from before versions as version 1', async () => {
+    stubFetch(() => reply({ status: 'ok' }));
+    expect(await probeScript(URL_)).toEqual({ kind: 'ok', version: 1 });
+  });
+  it('says there is no URL without asking', async () => {
+    const f = stubFetch(() => reply({ status: 'ok' }));
+    expect(await probeScript('  ')).toEqual({ kind: 'no-url' });
+    expect(f).not.toHaveBeenCalled();
+  });
+  it('says not reachable (a problem of the moment, not an old version) for no connection, a timeout or a local server problem', async () => {
+    stubFetch(() => Promise.reject(new TypeError('Failed to fetch')));
+    expect((await probeScript(URL_)).kind).toBe('unreachable');
+    stubFetch(() => reply({ status: 'error', code: 'unreachable', error: 'Could not reach Google.' }, 502));
+    expect(await probeScript(URL_)).toEqual({ kind: 'unreachable', message: 'Could not reach Google.' });
+    stubFetch(() => reply({ status: 'error', code: 'timeout', error: 'Google did not answer in time.' }, 504));
+    expect((await probeScript(URL_)).kind).toBe('unreachable');
+  });
+  it('says the URL is not WorkPulse\'s script when Google answers with a page or the answer is not the script\'s', async () => {
+    stubFetch(() => reply({ status: 'error', code: 'not_deployed', error: 'Google returned a web page.' }, 502));
+    expect((await probeScript(URL_)).kind).toBe('not-workpulse');
+    stubFetch(() => reply({ hello: 'world' }));
+    expect((await probeScript(URL_)).kind).toBe('not-workpulse');
   });
 });
 

@@ -14,7 +14,8 @@ function fakeSpawn() {
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
     child.stdinData = '';
-    child.stdin = { end: (d: string) => { child.stdinData = d; } };
+    // The real stdin is an event emitter: with no 'error' listener, emitting 'error' on it throws (an uncaught error).
+    child.stdin = Object.assign(new EventEmitter(), { end: (d: string) => { child.stdinData = d; } });
     child.kill = vi.fn();
     return child;
   };
@@ -113,6 +114,35 @@ describe('runClaudeJson', () => {
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.reason).toMatch(/unreadable/i);
     }
+  });
+  it('does not crash when Claude Code exits before reading the request (EPIPE on stdin)', async () => {
+    const f = fakeSpawn();
+    const run = runClaudeJson({ prompt: 'p', schema: SCHEMA, spawnFn: f.spawnFn });
+    // emit() throws when nobody listens for 'error', which is what would be an uncaught error in the real app
+    expect(() => f.child().stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }))).not.toThrow();
+    f.finish('', 1, 'Not logged in · Please run /login');
+    const r = await run;
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/not signed in/i);
+  });
+  it('names an early exit when Claude Code said nothing at all', async () => {
+    const f = fakeSpawn();
+    const run = runClaudeJson({ prompt: 'p', schema: SCHEMA, spawnFn: f.spawnFn });
+    f.child().stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+    f.finish('', 1, '');
+    const r = await run;
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/stopped before it could read/i);
+  });
+  it('still reports the first line when Claude Code prints a huge error', async () => {
+    const f = fakeSpawn();
+    const run = runClaudeJson({ prompt: 'p', schema: SCHEMA, spawnFn: f.spawnFn });
+    f.child().stderr.emit('data', Buffer.from('Something broke\n'));
+    for (let i = 0; i < 30; i++) f.child().stderr.emit('data', Buffer.from('x'.repeat(50_000)));
+    f.finish('', 2);
+    const r = await run;
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('Something broke');
   });
   it('stops a run that takes too long', async () => {
     vi.useFakeTimers();

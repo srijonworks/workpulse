@@ -6,7 +6,11 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-const PORT = 38417;
+// A test copy (WORKPULSE_USER_DATA set) keeps its data, its single-instance lock and, with WORKPULSE_TEST_PORT, its address
+// apart from the installed app. The installed app never sets either.
+const TEST_PROFILE = Boolean(process.env.WORKPULSE_USER_DATA);
+if (TEST_PROFILE) app.setPath('userData', process.env.WORKPULSE_USER_DATA);
+const PORT = TEST_PROFILE && Number(process.env.WORKPULSE_TEST_PORT) > 0 ? Number(process.env.WORKPULSE_TEST_PORT) : 38417;
 const ORIGIN = `http://localhost:${PORT}`;
 const PRELOAD = path.join(__dirname, 'preload.cjs');
 
@@ -14,48 +18,70 @@ process.env.PORT = String(PORT);
 process.env.HOST = '127.0.0.1';
 process.env.NODE_ENV = 'production';
 process.env.WORKPULSE_DIST = path.join(__dirname, 'app', 'dist');
+// Tells the bundled server it runs inside this app: it passes start-up errors on to the dialog below instead of exiting.
+process.env.WORKPULSE_DESKTOP = '1';
 
 let win = null;
 let tray = null;
 let quitting = false;
+// True once the window and the tray are up. Before that an error means the app cannot start (say why, then quit).
+// After that the tray app keeps running: a stray error must not end a day of tracking.
+let started = false;
+// The shell's own decisions (src/shell, bundled into app/shell.cjs by scripts/build-desktop.mjs).
+let policy = null;
+
+function showStartError(err) {
+  dialog.showErrorBox(
+    'WorkPulse could not start',
+    err && err.code === 'EADDRINUSE'
+      ? `Port ${PORT} is already in use. Close the other program using it (or another copy of WorkPulse) and open WorkPulse again.`
+      : String((err && err.message) || err),
+  );
+  quitting = true;
+  app.quit();
+}
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => showWindow());
   process.on('uncaughtException', (err) => {
-    dialog.showErrorBox(
-      'WorkPulse could not start',
-      err && err.code === 'EADDRINUSE'
-        ? `Port ${PORT} is already in use. Close the other program using it (or another copy of WorkPulse) and open WorkPulse again.`
-        : String((err && err.message) || err),
-    );
-    quitting = true;
-    app.quit();
+    if (started) {
+      console.error('WorkPulse error (the app keeps running):', err);
+      return;
+    }
+    showStartError(err);
   });
-  app.whenReady().then(start);
+  process.on('unhandledRejection', (reason) => console.error('WorkPulse unhandled rejection (the app keeps running):', reason));
+  app.whenReady().then(() => start().catch(showStartError));
 }
 
-function waitForServer(tries = 100) {
+// Waits (up to `ms`) for the server to answer. Each try has its own short timeout, so one connection that never
+// answers cannot stall the start.
+function waitForServer(ms = 20000) {
+  const deadline = Date.now() + ms;
   return new Promise((resolve, reject) => {
-    const attempt = (n) => {
-      http
-        .get(`${ORIGIN}/api/health`, (res) => {
-          res.resume();
-          resolve();
-        })
-        .on('error', () => (n <= 0 ? reject(new Error('The WorkPulse server did not start.')) : setTimeout(() => attempt(n - 1), 200)));
+    const attempt = () => {
+      const retry = () => (Date.now() >= deadline ? reject(new Error('The WorkPulse server did not start.')) : setTimeout(attempt, 200));
+      const req = http.get(`${ORIGIN}/api/health`, { timeout: 1000 }, (res) => {
+        res.resume();
+        resolve();
+      });
+      req.on('timeout', () => req.destroy());
+      req.on('error', retry);
     };
-    attempt(tries);
+    attempt();
   });
 }
 
 async function start() {
+  policy = require(path.join(__dirname, 'app', 'shell.cjs'));
   require(path.join(__dirname, 'app', 'server.cjs'));
   await waitForServer();
   createWindow();
   createTray();
   setupUpdates();
+  started = true;
 }
 
 // ---- Updates ----
@@ -66,15 +92,32 @@ const UPDATE_PORT = 38418;
 
 function serveUpdates() {
   const server = http.createServer((req, res) => {
-    const name = path.basename(decodeURIComponent((req.url || '').split('?')[0]));
+    // Any program on this PC can send a request here, and the folder can change while a build writes it:
+    // a bad address or a vanished file is an answer (400, 404), never an error that reaches the app.
+    let name = '';
+    try {
+      name = path.basename(decodeURIComponent((req.url || '').split('?')[0]));
+    } catch {
+      res.writeHead(400);
+      res.end();
+      return;
+    }
     const file = path.join(UPDATE_DIR, name);
-    if (!/^(latest\.yml|.*\.(exe|blockmap))$/i.test(name) || !fs.existsSync(file)) {
+    let size = -1;
+    try {
+      size = fs.statSync(file).size;
+    } catch {
+      size = -1;
+    }
+    if (!/^(latest\.yml|.*\.(exe|blockmap))$/i.test(name) || size < 0) {
       res.writeHead(404);
       res.end();
       return;
     }
-    res.writeHead(200, { 'Content-Length': fs.statSync(file).size });
-    fs.createReadStream(file).pipe(res);
+    res.writeHead(200, { 'Content-Length': size });
+    const stream = fs.createReadStream(file);
+    stream.on('error', () => res.destroy());
+    stream.pipe(res);
   });
   server.on('error', () => {});
   server.listen(UPDATE_PORT, '127.0.0.1');
@@ -156,12 +199,12 @@ function createWindow() {
   Menu.setApplicationMenu(null);
   win.loadURL(ORIGIN);
   // Links to other sites (WhatsApp Web, the phone link, docs) open in the normal browser.
+  // Only a web or mail link is handed over (never a file or a program-launching address), and a failure to open
+  // it is logged, not thrown.
   const external = (url) => {
-    if (!url.startsWith(ORIGIN)) {
-      shell.openExternal(url);
-      return true;
-    }
-    return false;
+    if (policy.isOurUrl(url, ORIGIN)) return false;
+    if (policy.isSafeExternal(url)) shell.openExternal(url).catch((err) => console.error('Could not open a link:', err && err.message));
+    return true;
   };
   win.webContents.setWindowOpenHandler(({ url }) => (external(url) ? { action: 'deny' } : { action: 'allow' }));
   win.webContents.on('will-navigate', (e, url) => {
@@ -177,7 +220,11 @@ function createWindow() {
 }
 
 function showWindow() {
-  if (!win) return;
+  // If the window was ever lost (it is only ever hidden), make a new one instead of leaving a tray with nothing behind it.
+  if (!win || win.isDestroyed()) {
+    if (!started) return;
+    createWindow();
+  }
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
@@ -310,7 +357,7 @@ function applyWidgets(config) {
 
 const fromOurPage = (event) => {
   try {
-    return event.senderFrame && event.senderFrame.url.startsWith(ORIGIN);
+    return policy.isOurUrl(event.senderFrame && event.senderFrame.url, ORIGIN);
   } catch {
     return false;
   }
@@ -340,3 +387,7 @@ ipcMain.on('wp:command', (event, cmd) => {
 app.on('before-quit', () => {
   quitting = true;
 });
+
+// Electron quits when its last window closes. WorkPulse lives in the tray, so a lost window must not end it:
+// only "Quit" in the tray does.
+app.on('window-all-closed', () => {});

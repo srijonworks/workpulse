@@ -58,4 +58,18 @@ describe('generateAiReport', () => {
     expect(r.error).toMatch(/could not reach its server/);
     expect(r.error).not.toMatch(/Failed to fetch/);
   });
+  it('gives up on a server that never answers and returns the template, so the dialog is never stuck', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchFn = vi.fn(() => new Promise(() => {})) as any;
+      const run = generateAiReport({ ...base, fetchFn });
+      await vi.advanceTimersByTimeAsync(101_000);
+      const r = await run;
+      expect(r.source).toBe('template');
+      expect(r.error).toMatch(/too long/);
+      expect(r.text).toContain('Fixed login');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

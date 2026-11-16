@@ -8,10 +8,12 @@ import { execFileSync } from 'child_process';
 import {
   isUnderFolder,
   deepestFolder,
+  describeGitFailure,
   parseClaudeLines,
   readClaudeHistory,
   readGitCommits,
   scanActivity,
+  type GitRunner,
 } from './activityReaders';
 import { localDayToUtcRange } from '../utils/activity/time';
 
@@ -143,6 +145,20 @@ describe('readClaudeHistory', () => {
     expect(r.items).toEqual([]);
     expect(r.status.ok).toBe(true);
   });
+  it('loses only one project folder when it cannot be listed, and says so', async () => {
+    const { claudeDir } = setup(new Date());
+    const broken = path.join(claudeDir, 'projects', 'broken');
+    fs.mkdirSync(broken);
+    const realReaddir = fs.promises.readdir;
+    vi.spyOn(fs.promises, 'readdir').mockImplementation(((p: unknown, ...rest: unknown[]) =>
+      String(p) === broken
+        ? Promise.reject(Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }))
+        : (realReaddir as (...a: unknown[]) => unknown)(p, ...rest)) as never);
+    const r = await readClaudeHistory(folders, range, { claudeDir });
+    expect(r.items.map((i) => i.id)).toEqual(['claude:s1:u1']);
+    expect(r.status.ok).toBe(true);
+    expect(r.status.note).toMatch(/1 history file\(s\) could not be read/);
+  });
 });
 
 // --- git ---------------------------------------------------------------------------------
@@ -224,6 +240,105 @@ describe('readGitCommits', () => {
   });
 });
 
+// --- git failures, with git itself replaced by a fake ----------------------------------------------
+describe('describeGitFailure', () => {
+  const REPO = 'E:\\Projects\\app';
+  it('says git is missing', () => {
+    expect(describeGitFailure(Object.assign(new Error('spawn git ENOENT'), { code: 'ENOENT' }), REPO).note).toMatch(/not installed or is not on this computer's PATH/);
+  });
+  it('says git took too long when it was stopped by the timeout', () => {
+    const note = describeGitFailure(Object.assign(new Error('Command failed'), { killed: true, signal: 'SIGTERM', code: null }), REPO).note;
+    expect(note).toContain('took too long');
+    expect(note).toContain(REPO);
+  });
+  it('gives the safe.directory command for "dubious ownership"', () => {
+    const err = Object.assign(new Error('Command failed'), { code: 128, stderr: "fatal: detected dubious ownership in repository at 'E:/Projects/app'\n" });
+    const note = describeGitFailure(err, REPO).note;
+    expect(note).toContain('git config --global --add safe.directory "E:/Projects/app"');
+  });
+  it('ignores a repo that has no commits yet', () => {
+    const r = describeGitFailure(Object.assign(new Error('x'), { code: 128, stderr: "fatal: your current branch 'main' does not have any commits yet" }), REPO);
+    expect(r.ignore).toBe(true);
+  });
+  it('keeps only the first line of anything else, with secrets redacted', () => {
+    const note = describeGitFailure(Object.assign(new Error('x'), { code: 2, stderr: 'fatal: bad thing ghp_abcdefghijklmnopqrstuvwxyz0123456789ab\nsecond line' }), REPO).note;
+    expect(note).toContain('fatal: bad thing');
+    expect(note).not.toContain('second line');
+    expect(note).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz0123456789ab');
+  });
+});
+
+describe('readGitCommits when git fails', () => {
+  // Folders that look like repos (a .git folder is enough: nothing runs git for real here).
+  const fakeRepo = (parent = tmp(), name = 'app'): string => {
+    const dir = path.join(parent, name);
+    fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
+    return dir;
+  };
+  const failing = (err: unknown): GitRunner => async () => {
+    throw err;
+  };
+
+  it('reports git as not installed (not ok) when every repo fails because of it', async () => {
+    const dir = fakeRepo();
+    const r = await readGitCommits([dir], range, { runGit: failing(Object.assign(new Error('spawn git ENOENT'), { code: 'ENOENT' })) });
+    expect(r.items).toEqual([]);
+    expect(r.status.ok).toBe(false);
+    expect(r.status.note).toMatch(/not installed/);
+    expect(r.status.note).not.toMatch(/user\.name is not set/);
+  });
+  it('reports a git that hangs, and passes a timeout to every git call', async () => {
+    const dir = fakeRepo();
+    const calls: { args: string[]; timeoutMs: number }[] = [];
+    const runGit: GitRunner = async (args, o) => {
+      calls.push({ args, timeoutMs: o.timeoutMs });
+      throw Object.assign(new Error('Command failed'), { killed: true, signal: 'SIGTERM', code: null });
+    };
+    const r = await readGitCommits([dir], range, { runGit });
+    expect(r.status.ok).toBe(false);
+    expect(r.status.note).toMatch(/took too long/);
+    const config = calls.find((c) => c.args[0] === 'config');
+    const log = calls.find((c) => c.args[0] === 'log');
+    expect(config?.timeoutMs).toBe(5_000);
+    expect(log?.timeoutMs).toBe(20_000);
+  });
+  it('still reads the other repos when one of them fails, and stays ok', async () => {
+    const parent = tmp();
+    const bad = fakeRepo(parent, 'bad');
+    const good = fakeRepo(parent, 'good');
+    const runGit: GitRunner = async (args, o) => {
+      if (o.cwd === bad) throw Object.assign(new Error('x'), { code: 128, stderr: 'fatal: detected dubious ownership in repository' });
+      if (args[0] === 'config') return { stdout: 'Alice\n' };
+      return { stdout: `${'a'.repeat(40)}\x1f2026-11-09T10:00:00+06:00\x1fgood work` };
+    };
+    const r = await readGitCommits([parent], range, { runGit });
+    expect(r.items.map((i) => i.text)).toEqual(['good work']);
+    expect(r.status.ok).toBe(true);
+    expect(r.status.note).toContain('safe.directory');
+  });
+  it('treats a repo with no commits yet as fine, without a note', async () => {
+    const dir = fakeRepo();
+    const runGit: GitRunner = async (args) => {
+      if (args[0] === 'config') return { stdout: 'Alice\n' };
+      throw Object.assign(new Error('x'), { code: 128, stderr: "fatal: your current branch 'main' does not have any commits yet" });
+    };
+    const r = await readGitCommits([dir], range, { runGit });
+    expect(r.items).toEqual([]);
+    expect(r.status).toMatchObject({ ok: true, count: 0 });
+    expect(r.status.note).toBeUndefined();
+  });
+  it('only says user.name is not set when git said so (exit 1, no output)', async () => {
+    const dir = fakeRepo();
+    const runGit: GitRunner = async (args) => {
+      if (args[0] === 'config') throw Object.assign(new Error('x'), { code: 1, stderr: '' });
+      return { stdout: '' };
+    };
+    const r = await readGitCommits([dir], range, { runGit });
+    expect(r.status.note).toContain('user.name is not set');
+    expect(r.status.ok).toBe(true);
+  });
+});
+
 describe('scanActivity', () => {
   const sources = { claude: true, git: true };
   it('rejects a relative path with a plain message', async () => {
@@ -253,6 +368,20 @@ describe('scanActivity', () => {
     const r = await scanActivity({ date: '2026-11-09', folders: [{ path: missing, projectId: 'p' }], sources: { claude: true, git: false } }, { claudeDir: tmp(), env: isolatedEnv() });
     expect(r.status.claude.note).toContain('Folder not found, skipped');
     expect(r.status.git.note).toBe('Turned off in Settings');
+  });
+  it('skips a folder that never answers after a few seconds, reads the others, and says so', async () => {
+    const hung = path.join(tmp(), 'dead-share');
+    const live = tmp();
+    const realStat = fs.promises.stat;
+    vi.spyOn(fs.promises, 'stat').mockImplementation(((p: unknown, ...rest: unknown[]) =>
+      String(p) === hung ? new Promise(() => {}) : (realStat as (...a: unknown[]) => unknown)(p, ...rest)) as never);
+    const r = await scanActivity(
+      { date: '2026-11-09', folders: [{ path: hung, projectId: 'a' }, { path: live, projectId: 'b' }], sources },
+      { claudeDir: tmp(), env: isolatedEnv(), folderTimeoutMs: 50 },
+    );
+    expect(r.status.git.note).toContain(`Folder did not answer, skipped: ${hung}`);
+    expect(r.status.git.note).not.toContain(live);
+    expect(r.status.git.ok).toBe(true);
   });
   it('does not throw on an empty day', async () => {
     const r = await scanActivity({ date: '2026-11-09', folders: [{ path: tmp(), projectId: 'p' }], sources }, { claudeDir: tmp(), env: isolatedEnv() });

@@ -1,4 +1,4 @@
-// Prepares electron/app: the built page (dist/) and the server bundled into one file.
+// Prepares electron/app: the built page (dist/), the server bundled into one file, and the shell's logic bundled into another.
 import { build } from 'esbuild';
 import fs from 'node:fs';
 
@@ -16,5 +16,16 @@ await build({
   external: ['vite'],
   banner: { js: "const __importMetaUrl = require('url').pathToFileURL(__filename).href;" },
   define: { 'import.meta.url': '__importMetaUrl' },
+  logLevel: 'info',
+});
+
+// The shell's own decisions (src/shell), loaded by electron/main.cjs.
+await build({
+  entryPoints: ['src/shell/index.ts'],
+  outfile: 'electron/app/shell.cjs',
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: 'node22',
   logLevel: 'info',
 });

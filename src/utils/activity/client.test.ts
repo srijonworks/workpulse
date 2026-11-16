@@ -18,6 +18,24 @@ describe('scanActivityApi', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(403, { error: 'Only works on this computer.' })));
     await expect(scanActivityApi(req)).rejects.toThrow('Only works on this computer.');
   });
+  it('gives up on a scan that never answers, with a plain sentence, instead of waiting forever', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+      const run = scanActivityApi(req).catch((e) => e);
+      await vi.advanceTimersByTimeAsync(76_000);
+      const err = await run;
+      expect(err).toBeInstanceOf(Error);
+      expect(err.message).toMatch(/too long/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('says plainly when the server answered with something that is not JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => { throw new SyntaxError('Unexpected token <'); } }));
+    const err = await scanActivityApi(req).catch((e) => e);
+    expect(err.message).not.toMatch(/token|JSON/i);
+  });
   it('returns the parsed body on success and posts the request as JSON', async () => {
     const body = { items: [], status: { claude: { ok: true, count: 0 }, git: { ok: true, count: 0 } } };
     const f = vi.fn().mockResolvedValue(reply(200, body));

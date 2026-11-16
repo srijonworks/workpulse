@@ -1,5 +1,7 @@
 import { WorkLog, ReportFormat, ReportTone } from '../types';
 import { plainAiMessage } from './aiErrors';
+import { requestJson } from './net/http';
+import { AI_REQUEST_TIMEOUT_MS } from './net/timeouts';
 import type { ActivityAi } from './activity/types';
 
 export interface GenerateReportParams {
@@ -92,25 +94,19 @@ Generate the final message text now. Do not wrap in markdown code fence unless c
     return { text: generateFallbackTemplate(logs, format, tone, recipientName), source: 'template' };
   }
 
+  // The request has a time limit and never throws: a server that is down or too slow gives the plain-sentence template below.
   let error: string | undefined;
-  try {
-    const res = await fetchFn('/api/gemini/generate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(standupRequestBody(ai, prompt, systemInstruction, customApiKey)),
-    });
-
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && typeof data.text === 'string' && data.text.trim()) {
-      return { text: data.text.trim(), source: ai, model: data.modelUsed };
-    }
-    error = plainAiMessage(data.error || data.notice || `The AI request failed (status ${res.status}).`);
-  } catch (err) {
-    console.warn('The AI request failed or is unavailable, using the offline template generator:', err);
-    error = plainAiMessage('Could not reach the WorkPulse server.');
+  const r = await requestJson<{ text?: unknown; modelUsed?: string; error?: string; notice?: string }>('/api/gemini/generate', {
+    method: 'POST',
+    body: standupRequestBody(ai, prompt, systemInstruction, customApiKey),
+    timeoutMs: AI_REQUEST_TIMEOUT_MS,
+    fetchFn,
+  });
+  const data = (r.ok ? r.data : r.data && typeof r.data === 'object' ? r.data : {}) as { text?: unknown; modelUsed?: string; error?: string; notice?: string };
+  if (r.ok && typeof data.text === 'string' && data.text.trim()) {
+    return { text: data.text.trim(), source: ai, model: data.modelUsed };
   }
+  error = plainAiMessage(data.error || data.notice || (r.ok ? 'The AI did not answer.' : r.message));
 
   // High-fidelity fallback template generator
   return {

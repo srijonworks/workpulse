@@ -15,6 +15,31 @@ import type {
 } from '../utils/activity/types';
 
 const execFileAsync = promisify(execFile);
+const fsp = fs.promises;
+
+const exists = (p: string): Promise<boolean> => fsp.access(p).then(() => true, () => false);
+
+const TIMED_OUT = Symbol('timed out');
+const FOLDER_STAT_TIMEOUT_MS = 5_000;
+
+/** The promise's value, or TIMED_OUT when it has not settled after `ms`. The work itself is not cancelled. */
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([p, new Promise<typeof TIMED_OUT>((resolve) => (timer = setTimeout(() => resolve(TIMED_OUT), ms)))]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Whether a listed folder is there. A folder on a share that never answers is 'slow', not a hang for the whole scan. */
+async function folderState(p: string, timeoutMs = FOLDER_STAT_TIMEOUT_MS): Promise<'dir' | 'missing' | 'slow'> {
+  const r = await withTimeout(
+    fsp.stat(p).then((s): 'dir' | 'missing' => (s.isDirectory() ? 'dir' : 'missing'), (): 'missing' => 'missing'),
+    timeoutMs,
+  );
+  return r === TIMED_OUT ? 'slow' : r;
+}
 
 interface Range {
   startIso: string;
@@ -149,22 +174,31 @@ export async function readClaudeHistory(
   opts: { claudeDir?: string } = {},
 ): Promise<{ items: ActivityItem[]; status: SourceStatus }> {
   const projectsDir = path.join(opts.claudeDir ?? path.join(os.homedir(), '.claude'), 'projects');
-  if (!fs.existsSync(projectsDir)) {
+  if (!(await exists(projectsDir))) {
     return { items: [], status: { ok: true, count: 0, note: 'No Claude Code history found on this computer' } };
   }
   const startMs = Date.parse(range.startIso);
   const items: ActivityItem[] = [];
   let unreadable = 0;
   try {
-    for (const entry of fs.readdirSync(projectsDir, { withFileTypes: true })) {
+    // Async file calls, so a slow disk never freezes the server (it runs inside the desktop app's main process).
+    for (const entry of await fsp.readdir(projectsDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const dir = path.join(projectsDir, entry.name);
-      for (const name of fs.readdirSync(dir)) {
+      // One unreadable project folder costs only its own sessions, not the whole source.
+      let names: string[];
+      try {
+        names = await fsp.readdir(dir);
+      } catch {
+        unreadable++;
+        continue;
+      }
+      for (const name of names) {
         if (!name.endsWith('.jsonl')) continue;
         const file = path.join(dir, name);
         try {
           // A session file not touched since before this day cannot hold activity from it.
-          if (fs.statSync(file).mtimeMs < startMs) continue;
+          if ((await fsp.stat(file)).mtimeMs < startMs) continue;
           const rl = readline.createInterface({ input: fs.createReadStream(file), crlfDelay: Infinity });
           items.push(...(await parseClaudeLines(rl, { folders, ...range })));
         } catch {
@@ -188,10 +222,10 @@ export async function readClaudeHistory(
 
 // --- git ---------------------------------------------------------------------------------------
 
-const hasGit = (dir: string): boolean => fs.existsSync(path.join(dir, '.git'));
+const hasGit = (dir: string): Promise<boolean> => exists(path.join(dir, '.git'));
 
 // Each listed folder itself (if it is a repo) plus its immediate child repos.
-function findRepos(folders: string[]): string[] {
+export async function findRepos(folders: string[]): Promise<string[]> {
   const seen = new Set<string>();
   const repos: string[] = [];
   const add = (dir: string) => {
@@ -202,10 +236,10 @@ function findRepos(folders: string[]): string[] {
     }
   };
   for (const folder of folders) {
-    if (hasGit(folder)) add(folder);
+    if (await hasGit(folder)) add(folder);
     try {
-      for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
-        if (entry.isDirectory() && hasGit(path.join(folder, entry.name))) add(path.join(folder, entry.name));
+      for (const entry of await fsp.readdir(folder, { withFileTypes: true })) {
+        if (entry.isDirectory() && (await hasGit(path.join(folder, entry.name)))) add(path.join(folder, entry.name));
       }
     } catch {
       // unreadable folder: nothing to add
@@ -214,26 +248,62 @@ function findRepos(folders: string[]): string[] {
   return repos;
 }
 
+const GIT_CONFIG_TIMEOUT_MS = 5_000;
+const GIT_LOG_TIMEOUT_MS = 20_000;
+
+/** Runs one git command in a repo. Rejects like child_process.execFile does (code, signal, killed, stderr). */
+export type GitRunner = (args: string[], opts: { cwd: string; timeoutMs: number }) => Promise<{ stdout: string }>;
+
+/**
+ * What a failed git call means, in a plain sentence. `ignore` is for the cases that are not a problem
+ * (a repo that has no commits yet). Never throws.
+ */
+export function describeGitFailure(err: unknown, repo: string): { note: string; ignore?: boolean } {
+  const e = (err ?? {}) as { code?: unknown; killed?: boolean; signal?: string | null; stderr?: unknown; message?: unknown };
+  const said = String(e.stderr || e.message || '');
+  if (e.code === 'ENOENT') return { note: "Git is not installed or is not on this computer's PATH." };
+  if (e.killed || e.signal === 'SIGTERM' || e.code === 'ETIMEDOUT') return { note: `Git took too long in ${repo} and was stopped.` };
+  if (/dubious ownership/i.test(said)) {
+    return { note: `Git does not trust the folder ${repo}. To allow it, run: git config --global --add safe.directory "${repo.replace(/\\/g, '/')}"` };
+  }
+  if (/does not have any commits yet|bad default revision/i.test(said)) return { note: '', ignore: true };
+  const first = said.split(/\r?\n/).map((l) => l.trim()).find((l) => l.length > 0);
+  return { note: `Git could not read ${repo}${first ? `: ${clip(redactSecrets(first), TEXT_MAX)}` : ''}` };
+}
+
 /** Commits made today across the listed folders' repos (all branches), by the repo's git user. */
 export async function readGitCommits(
   folders: string[],
   range: Range,
-  opts: { env?: NodeJS.ProcessEnv } = {},
+  opts: { env?: NodeJS.ProcessEnv; runGit?: GitRunner } = {},
 ): Promise<{ items: ActivityItem[]; status: SourceStatus }> {
   const env = opts.env ?? process.env;
+  const runGit: GitRunner =
+    opts.runGit ??
+    ((args, o) => execFileAsync('git', args, { cwd: o.cwd, env, timeout: o.timeoutMs, maxBuffer: 10 * 1024 * 1024, windowsHide: true }));
   const byId = new Map<string, ActivityItem>();
-  let note: string | undefined;
+  const notes: string[] = [];
+  const addNote = (n: string) => {
+    if (n && !notes.includes(n)) notes.push(n);
+  };
+  let tried = 0;
+  let failed = 0;
 
-  for (const repo of findRepos(folders)) {
+  for (const repo of await findRepos(folders)) {
     const folder = deepestFolder(repo, folders);
     if (!folder) continue;
+    tried++;
+    // Exit code 1 with no output is git's "not set". Any other failure here (git missing, hung, not trusted) is
+    // reported by the log call below, so it is not mistaken for a missing user.name.
     let userName = '';
+    let nameUnset = false;
     try {
-      userName = (await execFileAsync('git', ['config', 'user.name'], { cwd: repo, env })).stdout.trim();
-    } catch {
-      userName = '';
+      userName = (await runGit(['config', 'user.name'], { cwd: repo, timeoutMs: GIT_CONFIG_TIMEOUT_MS })).stdout.trim();
+      nameUnset = !userName;
+    } catch (err) {
+      nameUnset = (err as { code?: unknown })?.code === 1 && !String((err as { stderr?: unknown }).stderr ?? '').trim();
     }
-    if (!userName) note ??= `git user.name is not set in ${repo}: showing commits from all authors`;
+    if (nameUnset) addNote(`git user.name is not set in ${repo}: showing commits from all authors`);
 
     const args = [
       'log', '--all',
@@ -243,9 +313,16 @@ export async function readGitCommits(
     ];
     let stdout = '';
     try {
-      stdout = (await execFileAsync('git', args, { cwd: repo, env, maxBuffer: 10 * 1024 * 1024 })).stdout;
-    } catch {
-      continue; // empty repo or git failure: no items, not an error
+      stdout = (await runGit(args, { cwd: repo, timeoutMs: GIT_LOG_TIMEOUT_MS })).stdout;
+    } catch (err) {
+      // A repo with no commits yet is empty, not broken. Anything else is said in plain words, and the
+      // other repos are still read.
+      const why = describeGitFailure(err, repo);
+      if (!why.ignore) {
+        failed++;
+        addNote(why.note);
+      }
+      continue;
     }
     for (const row of stdout.split('\n')) {
       const [hash, iso, subject] = row.split('\x1f');
@@ -259,7 +336,9 @@ export async function readGitCommits(
   }
 
   const items = [...byId.values()].sort((a, b) => a.time.localeCompare(b.time));
-  return { items, status: { ok: true, count: items.length, note } };
+  const note = notes.length > 0 ? notes.slice(0, 3).join('. ') : undefined;
+  // Not ok only when every repo that was tried failed: one broken repo must not hide the others' commits.
+  return { items, status: { ok: !(tried > 0 && failed === tried), count: items.length, note } };
 }
 
 // --- one scan ---------------------------------------------------------------------------------
@@ -269,38 +348,36 @@ const OFF: SourceStatus = { ok: true, count: 0, note: 'Turned off in Settings' }
 /** Reads every switched-on source for one local day. Throws a plain-sentence Error on a bad folder. */
 export async function scanActivity(
   req: ScanRequest,
-  opts: { claudeDir?: string; env?: NodeJS.ProcessEnv } = {},
+  opts: { claudeDir?: string; env?: NodeJS.ProcessEnv; runGit?: GitRunner; folderTimeoutMs?: number } = {},
 ): Promise<ScanResponse> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(req.date)) throw new Error('Pick a valid date.');
   // A malformed path is a bug in the request and is refused. A folder that is simply gone (deleted,
   // drive unplugged) must not cost the user the other folders' suggestions: it is skipped and reported.
-  const paths: string[] = [];
-  const skipped: string[] = [];
+  // A folder that does not answer (a network drive that went away) is skipped too, after a few seconds.
   for (const f of req.folders) {
     if (typeof f?.path !== 'string' || !path.isAbsolute(f.path)) {
       throw new Error(`Enter the full folder path, like E:\\projects\\app. (${String(f?.path)})`);
     }
-    let isDir = false;
-    try {
-      isDir = fs.statSync(f.path).isDirectory();
-    } catch {
-      isDir = false;
-    }
-    if (isDir) paths.push(f.path);
-    else skipped.push(f.path);
   }
+  const states = await Promise.all(req.folders.map((f) => folderState(f.path, opts.folderTimeoutMs)));
+  const paths = req.folders.filter((_, i) => states[i] === 'dir').map((f) => f.path);
+  const skipped = req.folders.filter((_, i) => states[i] === 'missing').map((f) => f.path);
+  const slow = req.folders.filter((_, i) => states[i] === 'slow').map((f) => f.path);
 
   const range = localDayToUtcRange(req.date);
   const claude = req.sources.claude ? await readClaudeHistory(paths, range, { claudeDir: opts.claudeDir }) : { items: [], status: OFF };
-  const git = req.sources.git ? await readGitCommits(paths, range, { env: opts.env }) : { items: [], status: OFF };
+  const git = req.sources.git ? await readGitCommits(paths, range, { env: opts.env, runGit: opts.runGit }) : { items: [], status: OFF };
 
   const status: Record<ActivitySource, SourceStatus> = { claude: claude.status, git: git.status };
-  if (skipped.length > 0) {
+  const folderNotes = [
+    skipped.length > 0 ? `Folder not found, skipped: ${skipped.join(', ')}` : '',
+    slow.length > 0 ? `Folder did not answer, skipped: ${slow.join(', ')}` : '',
+  ].filter(Boolean);
+  if (folderNotes.length > 0) {
     // Said once, on the first source that is switched on.
     const carrier = req.sources.git ? 'git' : req.sources.claude ? 'claude' : null;
     if (carrier) {
-      const note = `Folder not found, skipped: ${skipped.join(', ')}`;
-      status[carrier] = { ...status[carrier], note: [status[carrier].note, note].filter(Boolean).join('. ') };
+      status[carrier] = { ...status[carrier], note: [status[carrier].note, ...folderNotes].filter(Boolean).join('. ') };
     }
   }
   const items = [...claude.items, ...git.items].sort((a, b) => a.time.localeCompare(b.time));

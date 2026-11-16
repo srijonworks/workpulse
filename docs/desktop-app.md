@@ -17,13 +17,16 @@ Run `C:\Users\DELL\wp-release\WorkPulse Setup 1.0.0.exe`. Windows may say "unkno
 ## Changing the app later (one click)
 1. Change the code as usual and test it with `npm run dev`.
 2. Run `npm run desktop:build`. It builds the page, bundles the server, raises the version (1.0.1, 1.0.2, ...) and writes the installer
-   plus `latest.yml` into `C:\Users\DELL\wp-release`.
+   plus `latest.yml` into `~\wp-release` (`C:\Users\DELL\wp-release` here).
 3. The installed app checks that folder when it starts and every 30 minutes (a tiny server on 127.0.0.1:38418 serves it, only on this PC),
    downloads the new version and asks **Restart now / Later**. "Later" installs it the next time the app quits. Tray menu -> **Check for
    updates** checks at once. Your data stays.
 - The first installer that has the updater is 1.0.1 or newer: install it by hand once, the rest is one click.
 - `npm run desktop:pack` makes only the unpacked folder (`wp-release\win-unpacked\WorkPulse.exe`) for a quick test.
-- Build notes: the build uses `C:\Users\DELL\wp-electron` (Electron unpacked there) and writes to `C:\Users\DELL\wp-release`, because
-  packing inside `E:\workpulse` failed with locked files. If `wp-electron` is missing, unzip the Electron zip from
-  `%LOCALAPPDATA%\electron\Cache` into it (`electron-v39.8.10-win32-x64.zip`), after `npm --prefix electron install`.
+- Build notes: `scripts/electron-builder.mjs` keeps its work folders in your home folder, not the repo: `~\wp-electron` (a copy of the
+  Electron files, made by the script when it is missing or the Electron version changed) and `~\wp-release` (installer and update feed),
+  because packing inside the repo failed with locked files.
+- First time on a PC: `npm --prefix electron install`. npm 12 blocks Electron's download script unless it is approved: `electron/package.json`
+  carries `allowScripts` for `electron@39.8.10`. If the binary is still missing (`electron/node_modules/electron/dist/electron.exe`), run
+  `npm --prefix electron rebuild electron`, or `node electron/node_modules/electron/install.js`.
 - The updater only works while `wp-release` exists on this PC. For other PCs the installers would have to be hosted (e.g. GitHub Releases).

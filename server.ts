@@ -10,6 +10,12 @@ import { GEMINI_MODEL_CASCADE, GEMINI_TIMEOUT_MS } from './src/utils/geminiModel
 import { buildBuckets, buildEodPrompt, mergeSynthesis, templateLog } from './src/utils/eodSynthesis';
 import { isAllowedHostHeader, isAllowedOrigin } from './src/utils/hostCheck';
 import { activityGuard } from './src/server/activityGuard';
+import { describeRouteError, installProcessGuards, jsonErrorHandler, listenErrorMessage } from './src/server/errors';
+import { forwardToScript } from './src/server/scriptProxy';
+import { backupsDir, dataDir, logsDir } from './src/server/dataDir';
+import { createLocalCopy } from './src/server/localCopy';
+import { cleanClientEntries, createLogBudget } from './src/server/clientLog';
+import { createFileLog } from './src/shell/fileLog';
 import { CLAUDE_MODEL_LABEL, claudeWriterGuard, eodViaClaude, standupViaClaude, writerFromRequest } from './src/server/aiWriter';
 import { createFolderPicker, isAllowedPickOrigin } from './src/server/folderPicker';
 import { scanActivity } from './src/server/activityReaders';
@@ -347,71 +353,73 @@ ${userPrompt}`, schema: ACTIVITY_TASKS_SCHEMA });
     }
   });
 
-  // Google Apps Script Proxy to circumvent browser CORS / redirect issues
-  app.post('/api/sheets/proxy', async (req, res) => {
-    try {
-      const { scriptUrl, payload, action, method } = req.body;
-      if (!scriptUrl) {
-        return res.status(400).json({ error: 'Google Apps Script URL is required' });
-      }
-
-      if (!isAllowedScriptUrl(String(scriptUrl))) {
-        return res.status(400).json({
-          error: 'Only Google Apps Script URLs (https://script.google.com/macros/s/...) are allowed',
-        });
-      }
-
-      const targetUrl = new URL(scriptUrl);
-      if (action) {
-        targetUrl.searchParams.set('action', action);
-      }
-
-      const reqMethod = method || (action === 'ping' ? 'GET' : 'POST');
-
-      let response: Response;
-      if (reqMethod === 'GET') {
-        response = await fetch(targetUrl.toString(), {
-          method: 'GET',
-          redirect: 'follow',
-        });
-      } else {
-        const bodyPayload = {
-          action: action || payload?.action || 'appendLog',
-          ...payload,
-        };
-
-        response = await fetch(targetUrl.toString(), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(bodyPayload),
-          redirect: 'follow',
-        });
-      }
-
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        const data = await response.json();
-        return res.json(data);
-      } else {
-        const text = await response.text();
-        try {
-          const json = JSON.parse(text);
-          return res.json(json);
-        } catch {
-          // Not JSON: usually a Google sign-in or error page. This is a failure, not a success.
-          return res.status(502).json({
-            status: 'error',
-            error:
-              'Google returned a web page instead of the script response. Deploy the script as a Web app with "Who has access" set to "Anyone", and check the URL ends in /exec.',
-          });
-        }
-      }
-    } catch (err: any) {
-      console.error('Sheets Proxy Error:', err);
-      return res.status(500).json({ error: err?.message || 'Failed to communicate with Google Apps Script' });
+  // The log file (~/WorkPulse/logs): what happened and where, never what the user wrote. The page cannot write files, so
+  // it sends its errors here. Same guard as the routes that touch this computer's files, plus the Origin check.
+  const dataFolder = dataDir();
+  const serverLog = createFileLog({ dir: logsDir(dataFolder), name: `server-${PORT}` });
+  serverLog.info('server', `Started on port ${PORT}`);
+  const logBudget = createLogBudget();
+  app.post('/api/client-log', activityGuard(HOST, PORT), (req, res) => {
+    if (!isAllowedPickOrigin(req.headers.origin, PORT)) {
+      return res.status(403).json({ error: 'The log only takes entries from this app, on this computer.' });
     }
+    const entries = cleanClientEntries(req.body);
+    const allowed = logBudget.take(entries.length);
+    for (const e of entries.slice(0, allowed)) serverLog[e.level](e.area, e.message, e.detail);
+    return res.json({ ok: true, accepted: allowed });
+  });
+
+  // Copies of the user's data on this computer (~/WorkPulse/backups): what the app restores from when the browser's
+  // storage is wiped or damaged. Same guard as the routes that touch local files, plus the Origin check; the copy belongs
+  // to the address the page was loaded from (data belongs to an origin).
+  const localCopy = createLocalCopy(backupsDir(dataFolder));
+  const copyGuard = activityGuard(HOST, PORT);
+  const copyOrigin = (req: express.Request, res: express.Response): string | null => {
+    if (!isAllowedPickOrigin(req.headers.origin, PORT)) {
+      res.status(403).json({ error: 'Copies are only kept for this app, on this computer.' });
+      return null;
+    }
+    return String(req.headers.host || `localhost:${PORT}`);
+  };
+  app.get('/api/disk-copy', copyGuard, async (req, res) => {
+    const origin = copyOrigin(req, res);
+    if (!origin) return;
+    const r = await localCopy.read(origin);
+    if (r.damaged) serverLog.warn('disk-copy', 'A copy file failed its checksum');
+    return res.json({ copy: r.copy, damaged: r.damaged });
+  });
+  app.put('/api/disk-copy', copyGuard, async (req, res) => {
+    const origin = copyOrigin(req, res);
+    if (!origin) return;
+    const b = req.body ?? {};
+    const r = await localCopy.write(origin, { profileId: String(b.profileId ?? ''), rev: Number(b.rev), keys: b.keys, takeover: b.takeover === true });
+    if (r.ok) return res.json(r);
+    if (r.code === 'disk') serverLog.error('disk-copy', r.message);
+    return res.status(r.code === 'invalid' ? 400 : r.code === 'disk' ? 500 : 409).json(r);
+  });
+  app.post('/api/disk-copy/safety', copyGuard, async (req, res) => {
+    const origin = copyOrigin(req, res);
+    if (!origin) return;
+    const b = req.body ?? {};
+    const r = await localCopy.safety(origin, b.keys, String(b.reason ?? 'copy'), typeof b.profileId === 'string' ? b.profileId : undefined);
+    if (!r.ok && r.code === 'disk') serverLog.error('disk-copy', r.message);
+    return res.status(r.ok ? 200 : r.code === 'invalid' ? 400 : 500).json(r);
+  });
+
+  // Google Apps Script Proxy to circumvent browser CORS / redirect issues. The call itself (time limit, plain
+  // sentences for every failure) is in src/server/scriptProxy.ts.
+  app.post('/api/sheets/proxy', async (req, res) => {
+    const { scriptUrl, payload, action, method } = req.body ?? {};
+    if (!scriptUrl) {
+      return res.status(400).json({ error: 'Google Apps Script URL is required' });
+    }
+    if (!isAllowedScriptUrl(String(scriptUrl))) {
+      return res.status(400).json({
+        error: 'Only Google Apps Script URLs (https://script.google.com/macros/s/...) are allowed',
+      });
+    }
+    const answer = await forwardToScript({ scriptUrl: String(scriptUrl), action, method, payload });
+    return res.status(answer.status).json(answer.body);
   });
 
   // Health check
@@ -430,7 +438,8 @@ ${userPrompt}`, schema: ACTIVITY_TASKS_SCHEMA });
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       // Share the app's HTTP server for HMR so no extra port (24678) is needed
-      server: { middlewareMode: true, ws: { server: httpServer } },
+      // forwardConsole off: Vite would print every browser console error (with its stack) into this process's output.
+      server: { middlewareMode: true, ws: { server: httpServer }, forwardConsole: false },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -443,6 +452,23 @@ ${userPrompt}`, schema: ACTIVITY_TASKS_SCHEMA });
     });
   }
 
+  // Last of all: anything a route lets escape (an oversized or malformed body, a bug) is answered as JSON with a
+  // plain sentence, never as an HTML error page.
+  app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (describeRouteError(err).status >= 500) serverLog.error('route', `${req.method} ${req.path} failed`, err);
+    jsonErrorHandler(err, req, res, next);
+  });
+
+  // Inside the desktop app the shell shows the reason in its own dialog (and exiting here would close the app
+  // with no message), so the error is passed on there.
+  const insideDesktopApp = process.env.WORKPULSE_DESKTOP === '1';
+  httpServer.on('error', (err: NodeJS.ErrnoException) => {
+    console.error(listenErrorMessage(err, PORT));
+    if (insideDesktopApp) throw err;
+    process.exit(1);
+  });
+  if (!insideDesktopApp) installProcessGuards();
+
   httpServer.listen(PORT, HOST, () => {
     console.log(`WorkPulse Server running on http://${HOST}:${PORT}`);
   });
@@ -450,5 +476,6 @@ ${userPrompt}`, schema: ACTIVITY_TASKS_SCHEMA });
 
 startServer().catch((err) => {
   console.error('Failed to start server:', err);
-  process.exit(1);
+  // Inside the desktop app, exiting would close it without a word; the shell reports that the server did not start.
+  if (process.env.WORKPULSE_DESKTOP !== '1') process.exit(1);
 });

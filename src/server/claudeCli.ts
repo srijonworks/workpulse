@@ -8,6 +8,8 @@ import os from 'os';
 
 export const CLAUDE_MODEL = 'haiku';
 export const CLAUDE_TIMEOUT_MS = 60_000;
+const MAX_STDOUT_CHARS = 5_000_000;
+const MAX_STDERR_CHARS = 100_000;
 
 export type ClaudeRunResult = { ok: true; data: unknown } | { ok: false; reason: string };
 
@@ -83,10 +85,22 @@ export function runClaudeJson(opts: {
       done({ ok: false, reason: 'Claude Code took too long to answer.' });
     }, opts.timeoutMs ?? CLAUDE_TIMEOUT_MS);
 
+    // The answer is one small JSON object and the error text is read for its first line: neither needs more.
     let stdout = '';
     let stderr = '';
-    child.stdout?.on('data', (d) => (stdout += d));
-    child.stderr?.on('data', (d) => (stderr += d));
+    child.stdout?.on('data', (d) => {
+      if (stdout.length < MAX_STDOUT_CHARS) stdout += d;
+    });
+    child.stderr?.on('data', (d) => {
+      if (stderr.length < MAX_STDERR_CHARS) stderr += d;
+    });
+    // Claude Code can exit before it reads the prompt (not signed in, bad arguments). Writing to it then fails with
+    // EPIPE on stdin; without a listener that error is uncaught and would take the whole desktop app down. The
+    // "close" event below reports what happened.
+    let stdinFailed = false;
+    child.stdin?.on('error', () => {
+      stdinFailed = true;
+    });
 
     child.on('error', (err: NodeJS.ErrnoException) => {
       done({
@@ -111,7 +125,9 @@ export function runClaudeJson(opts: {
       }
       if (code !== 0 && parsed === undefined) {
         const said = stderr || stdout;
-        return done({ ok: false, reason: SIGN_IN.test(said) ? SIGN_IN_REASON : `Claude Code failed: ${firstLine(said) || `exit code ${code}`}` });
+        if (SIGN_IN.test(said)) return done({ ok: false, reason: SIGN_IN_REASON });
+        if (stdinFailed && !firstLine(said)) return done({ ok: false, reason: 'Claude Code stopped before it could read the request.' });
+        return done({ ok: false, reason: `Claude Code failed: ${firstLine(said) || `exit code ${code}`}` });
       }
       if (parsed && typeof parsed === 'object' && parsed.structured_output && typeof parsed.structured_output === 'object') {
         return done({ ok: true, data: parsed.structured_output });

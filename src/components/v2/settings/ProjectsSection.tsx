@@ -154,7 +154,7 @@ const ProjectRow: React.FC<ProjectRowProps> = ({
   };
 
   return (
-    <li className="v2-row">
+    <li className="v2-row v2-inset">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <IconButton
           label={`Change colour of ${project.name}`}
@@ -479,7 +479,7 @@ export const ProjectsSection: React.FC<ProjectsSectionProps> = ({
         ) : (
           <ul className="v2-panel">
             {trashed.map((p) => (
-              <li key={p.id} className="v2-row">
+              <li key={p.id} className="v2-row v2-inset">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <span
                     className="block h-5 w-5 shrink-0 rounded-[var(--radius-btn)] border border-[var(--border-control)]"

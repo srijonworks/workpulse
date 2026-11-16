@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { addDays, localDateStr } from './dates';
-import { loadStoredData, saveLogs, saveWorkdays, rollOverTasks, CURRENT_SCHEMA_VERSION } from './storage';
+import { loadStoredData, saveLogs, saveTags, saveWorkdays, rollOverTasks, replaceAllData, getEngine, CURRENT_SCHEMA_VERSION } from './storage';
 
 const log = (id: string) => ({
   id,
@@ -165,6 +165,126 @@ describe('save*', () => {
   });
   it('returns ok:true on success', () => {
     expect(saveLogs([]).ok).toBe(true);
+  });
+});
+
+describe('a failed save is kept, not lost', () => {
+  const breakWrites = (times = Infinity) => {
+    const ls = (globalThis as any).localStorage;
+    const real = ls.setItem.bind(ls);
+    let left = times;
+    ls.setItem = (k: string, v: string) => {
+      if (left-- > 0) throw new DOMException('full', 'QuotaExceededError');
+      real(k, v);
+    };
+    return () => {
+      ls.setItem = real;
+    };
+  };
+
+  it('keeps the value, says it is not saved, and writes it when storage works again', () => {
+    const fix = breakWrites();
+    const r = saveLogs([log('kept') as any]);
+    expect(r).toMatchObject({ ok: false, kind: 'quota' });
+    expect(getEngine().status()).toMatchObject({ notSaved: true, dirtyKeys: ['workpulse_logs'] });
+    expect(localStorage.getItem('workpulse_logs')).toBeNull();
+    fix();
+    expect(getEngine().retry().ok).toBe(true);
+    expect(JSON.parse(localStorage.getItem('workpulse_logs') as string)[0].id).toBe('kept');
+    expect(getEngine().status().notSaved).toBe(false);
+  });
+
+  it('a later save of the same key replaces the waiting one, so the newest data wins', () => {
+    const fix = breakWrites();
+    saveLogs([log('old') as any]);
+    saveLogs([log('old') as any, log('newer') as any]);
+    fix();
+    getEngine().retry();
+    expect(JSON.parse(localStorage.getItem('workpulse_logs') as string).map((l: { id: string }) => l.id)).toEqual(['old', 'newer']);
+  });
+});
+
+describe('a key that could not be read is never written over', () => {
+  it('blocks a corrupt key: the empty fallback cannot replace the damaged data, and other keys still save', () => {
+    localStorage.setItem('workpulse_tags', '{bad');
+    loadStoredData();
+    expect(getEngine().status().blockedKeys).toEqual(['workpulse_tags']);
+    expect(saveTags(['mine'])).toMatchObject({ ok: false, kind: 'blocked' });
+    expect(localStorage.getItem('workpulse_tags')).toBe('{bad');
+    expect(saveLogs([log('fine') as any]).ok).toBe(true);
+    expect(localStorage.getItem('workpulse_tags')).toBe('{bad'); // still, after another key saved
+  });
+
+  it('blocks a key that cannot be read at all (storage throws on read)', () => {
+    const ls = (globalThis as any).localStorage;
+    ls.setItem('workpulse_logs', JSON.stringify([log('a')]));
+    const realGet = ls.getItem.bind(ls);
+    ls.getItem = (k: string) => {
+      if (k === 'workpulse_logs') throw new DOMException('denied', 'SecurityError');
+      return realGet(k);
+    };
+    const r = loadStoredData();
+    expect(r.logs).toEqual([]);
+    expect(r.warnings.join(' ')).toMatch(/Could not read "workpulse_logs"/);
+    expect(getEngine().status().blockedKeys).toContain('workpulse_logs');
+    ls.getItem = realGet;
+    expect(saveLogs([]).ok).toBe(false);
+    expect(JSON.parse(localStorage.getItem('workpulse_logs') as string)[0].id).toBe('a'); // the real data is still there
+  });
+
+  it('notices a key that was saved before and is gone, and does not put demo data in its place', () => {
+    saveLogs([log('mine') as any]);
+    localStorage.removeItem('workpulse_logs');
+    const r = loadStoredData();
+    expect(r.logs).toEqual([]); // not the seed logs
+    expect(r.warnings.join(' ')).toMatch(/"workpulse_logs" is missing/);
+    expect(getEngine().status().blockedKeys).toContain('workpulse_logs');
+  });
+
+  it('does not mistake a first run for a loss', () => {
+    const r = loadStoredData();
+    expect(r.logs.length).toBeGreaterThan(0);
+    expect(getEngine().status().blockedKeys).toEqual([]);
+  });
+
+  it('a backup import replaces damaged data: the key is let go, written, and no longer blocked', () => {
+    localStorage.setItem('workpulse_logs', '{bad');
+    loadStoredData();
+    expect(getEngine().status().blockedKeys).toContain('workpulse_logs');
+    const r = replaceAllData({ logs: [log('imported') as any], backlog: [], projects: [], tags: [], settings: {} as any });
+    expect(r.ok).toBe(true);
+    expect(JSON.parse(localStorage.getItem('workpulse_logs') as string)[0].id).toBe('imported');
+    expect(getEngine().status().blockedKeys).toEqual([]);
+  });
+
+  it('a failed import puts everything back, keeps nothing for later, and blocks the damaged key again', () => {
+    localStorage.setItem('workpulse_logs', '{bad');
+    loadStoredData();
+    saveTags(['before']);
+    const before = JSON.stringify(Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i) as string).sort().map((k) => [k, localStorage.getItem(k)]));
+    const ls = (globalThis as any).localStorage;
+    const real = ls.setItem.bind(ls);
+    ls.setItem = (k: string, v: string) => {
+      if (k === 'workpulse_projects') throw new DOMException('full', 'QuotaExceededError');
+      real(k, v);
+    };
+    const r = replaceAllData({ logs: [log('x') as any], backlog: [], projects: [], tags: ['after'], settings: {} as any });
+    ls.setItem = real;
+    expect(r.ok).toBe(false);
+    const after = JSON.stringify(Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i) as string).sort().map((k) => [k, localStorage.getItem(k)]));
+    expect(after).toBe(before);
+    expect(getEngine().status().dirtyKeys).toEqual([]);
+    expect(getEngine().status().blockedKeys).toContain('workpulse_logs');
+  });
+
+  it('remembers the identity of this browser profile across a load', () => {
+    saveLogs([]);
+    const id = getEngine().status().profileId;
+    const after = (globalThis as any).localStorage;
+    expect(JSON.parse(after.getItem('workpulse_meta')).profileId).toBe(id);
+    getEngine();
+    loadStoredData();
+    expect(getEngine().status().profileId).toBe(id);
   });
 });
 

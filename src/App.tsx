@@ -22,6 +22,7 @@ import {
   saveSettings as storeSettings,
   saveWorkdays as storeWorkdays,
   replaceAllData,
+  getEngine,
   SaveResult,
 } from './utils/storage';
 import { buildBackup, downloadTextFile, parseBackup } from './utils/backup';
@@ -54,6 +55,7 @@ import { deleteProjectForever, liveProjectsOf, restoreProject, trashProject } fr
 import { usePhoneSync } from './hooks/usePhoneSync';
 import { useSheetBackup } from './hooks/useSheetBackup';
 import { useWidgetBridge } from './hooks/useWidgetBridge';
+import { usePersistence, usePersistenceStatus, useThisWindow } from './hooks/usePersistence';
 import { keepDeviceSettings } from './utils/phoneSettings';
 import { applyPlan, planCandidates, planSummary } from './utils/planYourDay';
 import { publishTimers } from './utils/timerStore';
@@ -85,6 +87,13 @@ import { LightboxModal } from './components/LightboxModal';
 import { ToastContainer } from './components/ToastContainer';
 import { SampleDataBanner } from './components/SampleDataBanner';
 import { OfflineNotice } from './components/OfflineNotice';
+import { SaveStatusBanner } from './components/SaveStatusBanner';
+import { DiskCopyBanner } from './components/DiskCopyBanner';
+import { useHeartbeat } from './hooks/useHeartbeat';
+import { recordRepairs, repairData } from './utils/dataDoctor';
+import { saveSafetyCopy, useDiskCopy, useDiskCopyState } from './hooks/useDiskCopy';
+import { ErrorBoundary } from './components/ui/ErrorBoundary';
+import { CrashProbe } from './components/ui/CrashProbe';
 import { BackupReminder } from './components/BackupReminder';
 import { EodSynthesizerModal, SynthesizedLogItem } from './components/EodSynthesizerModal';
 import { ActivitySuggestionsDialog } from './components/activity/ActivitySuggestionsDialog';
@@ -163,36 +172,41 @@ export default function App() {
   // "Later" on the backup reminder: hidden until the next visit, not remembered.
   const [backupReminderHidden, setBackupReminderHidden] = useState(false);
 
+  // Set when a save did not go through and cleared right after, so a "success" toast raised in that same moment
+  // ("Log added") says it is not saved yet instead of claiming all is well.
+  const saveFailedNow = useRef(false);
   const addToast = (
     message: string,
     type: 'success' | 'error' | 'info' = 'success',
     action?: ToastMessage['action'],
   ) => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    if (saveFailedNow.current && type !== 'error') {
+      message = `${message.replace(/[.\s]+$/, '')}. It is not saved yet: see the notice at the top.`;
+      type = 'info';
+    }
     // Errors and anything with an action (Undo, Retry) stay 8 s; the toast itself dismisses on a
     // timer that hovering or focusing it pauses (see ToastContainer).
     setToasts((prev) => [...prev, { id, type, message, action, durationMs: action || type === 'error' ? 8000 : 3500 }]);
   };
 
-  // Save wrappers: a failed save (storage full or blocked) shows one error toast per 30 s
-  // instead of failing silently. Callers can still read the returned result.
-  const lastSaveErrorAt = useRef(0);
-  const persist = (result: SaveResult, what: string): SaveResult => {
-    if (!result.ok && Date.now() - lastSaveErrorAt.current > 30000) {
-      lastSaveErrorAt.current = Date.now();
-      addToast(
-        `Could not save ${what}: browser storage is full or blocked. Export a backup now (Settings).`,
-        'error',
-      );
+  // Save wrappers. A save that fails is kept and retried by the save engine, and the "Not saved" notice
+  // (SaveStatusBanner) stays on screen until it works. Callers can still read the returned result.
+  const persist = (result: SaveResult): SaveResult => {
+    if (!result.ok) {
+      saveFailedNow.current = true;
+      queueMicrotask(() => {
+        saveFailedNow.current = false;
+      });
     }
     return result;
   };
-  const saveLogs = (v: WorkLog[]) => persist(storeLogs(v), 'work logs');
-  const saveBacklog = (v: BacklogTask[]) => persist(storeBacklog(v), 'tasks');
-  const saveProjects = (v: Project[]) => persist(storeProjects(v), 'projects');
-  const saveTags = (v: string[]) => persist(storeTags(v), 'tags');
-  const saveSettings = (v: AppSettings) => persist(storeSettings(v), 'settings');
-  const saveWorkdays = (v: Workdays) => persist(storeWorkdays(v), 'the office clock');
+  const saveLogs = (v: WorkLog[]) => persist(storeLogs(v));
+  const saveBacklog = (v: BacklogTask[]) => persist(storeBacklog(v));
+  const saveProjects = (v: Project[]) => persist(storeProjects(v));
+  const saveTags = (v: string[]) => persist(storeTags(v));
+  const saveSettings = (v: AppSettings) => persist(storeSettings(v));
+  const saveWorkdays = (v: Workdays) => persist(storeWorkdays(v));
 
   // Records that these logs reached the Google Sheet, so they are never sent twice (B2).
   const markLogsSynced = (ids: string[]) => {
@@ -221,11 +235,24 @@ export default function App() {
   // 1. Initial load from localStorage (the loader maps old theme ids, normalises tasks and moves a timer left running past midnight to today).
   useEffect(() => {
     const loaded = loadStoredData();
-    setLogs(loaded.logs);
-    setBacklog(loaded.backlog);
-    setProjects(loaded.projects);
+    // The data doctor fixes damage that would break screens (see utils/dataDoctor). Not while a list is unreadable.
+    const engine = getEngine();
+    const fixed = engine.status().blockedKeys.length === 0 ? repairData(loaded) : { ...loaded, repairs: [] };
+    if (fixed.repairs.length > 0) {
+      const changed: [string, unknown][] = [];
+      if (fixed.logs !== loaded.logs) changed.push(['workpulse_logs', fixed.logs]);
+      if (fixed.backlog !== loaded.backlog) changed.push(['workpulse_backlog', fixed.backlog]);
+      if (fixed.projects !== loaded.projects) changed.push(['workpulse_projects', fixed.projects]);
+      if (fixed.workdays !== loaded.workdays) changed.push(['workpulse_workdays', fixed.workdays]);
+      if (changed.length > 0) engine.saveGroup(changed);
+      recordRepairs(fixed.repairs);
+      addToast(`WorkPulse repaired ${fixed.repairs.length} problem${fixed.repairs.length === 1 ? '' : 's'} in your data. Nothing was deleted.`, 'info');
+    }
+    setLogs(fixed.logs);
+    setBacklog(fixed.backlog);
+    setProjects(fixed.projects);
     setTags(loaded.tags);
-    setWorkdays(loaded.workdays);
+    setWorkdays(fixed.workdays);
     if (loaded.warnings.length > 0) {
       addToast(loaded.warnings.join(' '), 'error');
     }
@@ -1034,6 +1061,7 @@ export default function App() {
         'Replace all work logs, tasks, projects and tags with the demo data? A backup file of your current data will be downloaded first.',
       )
     ) {
+      saveSafetyCopy('before-reset');
       downloadTextFile(`workpulse-pre-reset-${localDateStr()}.json`, backupNow());
       const seed = getInitialSeedData();
       setLogs(seed.logs);
@@ -1097,6 +1125,7 @@ export default function App() {
         'Remove ALL logs, tasks and tags, and keep a single "General" project? Your settings (theme, API key, Sheet URL) stay. A backup file of your current data is downloaded first.',
       )
     ) {
+      saveSafetyCopy('before-start-fresh');
       downloadTextFile(`workpulse-pre-fresh-${localDateStr()}.json`, backupNow());
       const general: Project = { id: `proj-${Date.now()}`, name: 'General', color: '#6366f1', isArchived: false };
       setLogs([]);
@@ -1112,6 +1141,7 @@ export default function App() {
   };
 
   const handleFixLogDates = (fixes: DateFix[]) => {
+    saveSafetyCopy('before-date-fix');
     downloadTextFile(`workpulse-pre-datefix-${localDateStr()}.json`, backupNow());
     const updated = applyDateFixes(logs, fixes);
     setLogs(updated);
@@ -1129,9 +1159,25 @@ export default function App() {
     addToast('Backup downloaded (the Gemini API key is not included)', 'success');
   };
 
+  // "Start empty" on the Not-saved notice: the user chose to replace a list that could not be read. The key is let go
+  // and what this window holds for it is written, so the damaged value is replaced on purpose, not by accident.
+  const handleStartEmpty = (key: string) => {
+    getEngine().unblock(key);
+    const write: Record<string, () => SaveResult> = {
+      workpulse_logs: () => saveLogs(logs),
+      workpulse_backlog: () => saveBacklog(backlog),
+      workpulse_projects: () => saveProjects(projects),
+      workpulse_tags: () => saveTags(tags),
+      workpulse_settings: () => saveSettings(settings),
+      workpulse_workdays: () => saveWorkdays(workdays),
+    };
+    write[key]?.();
+  };
+
   const handleImportBackup = (data: BackupData) => {
     // Keep this machine's API key, backup date and phone link; backups never contain them. Workdays
     // travel with the backup (an older backup without them leaves the stored ones alone).
+    saveSafetyCopy('before-import'); // what is stored now stays on disk, in case the import is not what the user wanted
     const result = replaceAllData({
       ...data,
       settings: keepDeviceSettings(data.settings, settings),
@@ -1247,7 +1293,7 @@ export default function App() {
         return merged;
       }),
     );
-    persist(result, 'tasks');
+    persist(result);
     return result.ok;
   };
 
@@ -1282,6 +1328,17 @@ export default function App() {
       }
     },
   });
+  // Failed saves are retried, and only one window writes (see hooks/usePersistence).
+  usePersistence(dataLoaded);
+  const saveStatus = usePersistenceStatus();
+  // A copy of the data on this computer's disk, and the offer to bring it back (see hooks/useDiskCopy).
+  const diskCopy = useDiskCopy(dataLoaded, () => {
+    leavingRef.current = true;
+    timerDirty.current = false;
+  });
+  const diskCopyState = useDiskCopyState();
+  // "Alive now" every 30 s: after a shutdown it says when the PC was last in use (the automatic day uses it later).
+  useHeartbeat(dataLoaded);
   const sheetBackup = useSheetBackup({
     enabled: dataLoaded,
     settings,
@@ -1469,6 +1526,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[var(--bg-app)] text-[var(--text-main)] antialiased selection:bg-[var(--accent)] selection:text-[var(--on-accent)]">
+      <CrashProbe where="root" />
       <AppHeader
         active={activeTab}
         onTab={setActiveTab}
@@ -1478,6 +1536,7 @@ export default function App() {
         onNext={handleNext}
         onSearch={() => setIsSearchOpen(true)}
       >
+        <ErrorBoundary area="the clock" variant="inline">
         <ClockBand
           theme={theme}
           today={todayStr}
@@ -1490,10 +1549,19 @@ export default function App() {
           onClockOut={handleClockOut}
           onResume={handleResume}
         />
+        </ErrorBoundary>
       </AppHeader>
 
       <main className="pb-[calc(57px+16px+env(safe-area-inset-bottom))] sm:pb-0">
         <div className={`mx-auto max-w-[1440px] px-4 sm:px-8 pt-5 flex flex-col gap-3 empty:hidden`}>
+          <SaveStatusBanner
+            status={saveStatus}
+            onRetry={() => getEngine().retry()}
+            onDownloadBackup={handleBackupNow}
+            onUseThisWindow={useThisWindow}
+            onStartEmpty={handleStartEmpty}
+          />
+          <DiskCopyBanner offer={diskCopy.offer} state={diskCopyState} onRestore={diskCopy.restore} onKeep={diskCopy.keepThisBrowser} />
           <OfflineNotice />
           {showNotices && samples.total > 0 && (
             <SampleDataBanner
@@ -1508,6 +1576,8 @@ export default function App() {
           )}
         </div>
 
+        <ErrorBoundary area={`the ${activeTab} screen`} variant="screen" resetKeys={[activeTab]}>
+        <CrashProbe where={activeTab} />
         {activeTab === 'today' && (
           <TodayScreen
             backlog={backlog}
@@ -1617,15 +1687,22 @@ export default function App() {
             onDeleteProjectForever={h.deleteProjectForever}
           />
         )}
+        </ErrorBoundary>
       </main>
 
       <BottomNav active={activeTab} onChange={setActiveTab} openTasks={openTasks} />
 
       {editingTask && (
-        <EditTaskDialog task={editingTask} projects={liveProjects} onClose={() => setEditingTask(null)} onSave={handleSaveTaskEdit} />
+        <ErrorBoundary area="the edit task window" variant="dialog" onClose={() => setEditingTask(null)}>
+          <EditTaskDialog task={editingTask} projects={liveProjects} onClose={() => setEditingTask(null)} onSave={handleSaveTaskEdit} />
+        </ErrorBoundary>
       )}
-      <ClockInDialog isOpen={isClockInOpen} onClose={() => setIsClockInOpen(false)} onConfirm={handleClockIn} />
+      <ErrorBoundary area="the clock in window" variant="dialog" onClose={() => setIsClockInOpen(false)}>
+        <CrashProbe where="dialog" />
+        <ClockInDialog isOpen={isClockInOpen} onClose={() => setIsClockInOpen(false)} onConfirm={handleClockIn} />
+      </ErrorBoundary>
 
+      <ErrorBoundary area="the plan your day window" variant="dialog" onClose={() => setPlan(null)}>
       <PlanYourDayDialog
         isOpen={plan !== null}
         onClose={() => setPlan(null)}
@@ -1637,7 +1714,9 @@ export default function App() {
         onStart={handleStartDay}
         onProjectUsed={h.projectUsed}
       />
+      </ErrorBoundary>
 
+      <ErrorBoundary area="the end my day window" variant="dialog" onClose={h.closeEndDay}>
       <EndDayDialog
         isOpen={endDay !== null}
         initialStep={endDay?.step}
@@ -1657,8 +1736,10 @@ export default function App() {
         onClockOut={h.clockOutOpenDay}
         onOpenImage={h.openImage}
       />
+      </ErrorBoundary>
 
       {/* Timesheet from selected tasks (Tasks screen) or from History */}
+      <ErrorBoundary area="the timesheet window" variant="dialog" onClose={() => setIsEodSynthesizerOpen(false)}>
       <EodSynthesizerModal
         isOpen={isEodSynthesizerOpen}
         onClose={() => setIsEodSynthesizerOpen(false)}
@@ -1671,8 +1752,10 @@ export default function App() {
         onConfirmAndPush={handleConfirmEodPush}
         onOpenActivity={() => setIsActivityOpen(true)}
       />
+      </ErrorBoundary>
 
       {/* Activity suggestions as a dialog (phones and tablets; the Today card on wide screens) */}
+      <ErrorBoundary area="the suggestions window" variant="dialog" onClose={() => setIsActivityOpen(false)}>
       <ActivitySuggestionsDialog
         isOpen={isActivityOpen}
         onClose={() => setIsActivityOpen(false)}
@@ -1686,7 +1769,9 @@ export default function App() {
         onAddLogs={handleAddLogs}
         onOpenSettings={() => setActiveTab('settings')}
       />
+      </ErrorBoundary>
 
+      <ErrorBoundary area="the standup window" variant="dialog" onClose={() => setIsAiStandupOpen(false)}>
       <AiStandupModal
         isOpen={isAiStandupOpen}
         onClose={() => setIsAiStandupOpen(false)}
@@ -1698,7 +1783,9 @@ export default function App() {
         defaultTone={settings.defaultTone}
         onCopySuccess={() => addToast('Standup copied to clipboard')}
       />
+      </ErrorBoundary>
 
+      <ErrorBoundary area="the search window" variant="dialog" onClose={() => setIsSearchOpen(false)}>
       <SearchPaletteModal
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
@@ -1710,11 +1797,13 @@ export default function App() {
         }}
         onOpenImage={(base64) => setActiveLightboxImage(base64)}
       />
+      </ErrorBoundary>
 
       <LightboxModal imageBase64={activeLightboxImage} onClose={() => setActiveLightboxImage(null)} />
 
       {/* Opened last so it stacks over End my day when a log is edited from there. */}
       {logForm && (
+        <ErrorBoundary area="the log window" variant="dialog" onClose={() => setLogForm(null)}>
         <LogFormDialog
           isOpen
           projects={liveProjects}
@@ -1725,6 +1814,7 @@ export default function App() {
           onAddProject={handleAddProject}
           onClose={() => setLogForm(null)}
         />
+        </ErrorBoundary>
       )}
 
       <ToastContainer toasts={toasts} onDismiss={handleDismissToast} />

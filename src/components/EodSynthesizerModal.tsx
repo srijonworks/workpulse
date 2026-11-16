@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { ModalShell } from './ui/ModalShell';
 import { plainAiMessage } from '../utils/aiErrors';
+import { requestJson } from '../utils/net/http';
+import { AI_REQUEST_TIMEOUT_MS } from '../utils/net/timeouts';
 import { IconButton } from './ui/IconButton';
 import { localDateStr } from '../utils/dates';
 import { isEodCandidate, withUnloggedTime } from '../utils/taskLogging';
@@ -169,14 +171,15 @@ export const EodPanel: React.FC<EodPanelProps> = ({
         const buckets = buildBuckets(tasksToSend, projects.filter((p) => p && p.id));
         data = { synthesizedLogs: buckets.map(templateLog), isAIGenerated: false };
       } else {
-        const resp = await fetch('/api/synthesize-eod', {
+        // A time limit, and a plain sentence for every failure (see utils/net/http).
+        const resp = await requestJson<any>('/api/synthesize-eod', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(eodRequestBody(ai, tasksToSend, projects, todayStr, geminiApiKey)),
+          body: eodRequestBody(ai, tasksToSend, projects, todayStr, geminiApiKey),
+          timeoutMs: AI_REQUEST_TIMEOUT_MS,
         });
 
         if (!resp.ok) {
-          const errData = await resp.json().catch(() => ({}));
+          const errData = (resp.data && typeof resp.data === 'object' ? resp.data : {}) as { error?: string };
           if (eodUsesTemplateOnFailure(ai, false)) {
             // Claude refused (not the local setup) or failed: same offline templates as the "no AI" setting, with the reason shown.
             const buckets = buildBuckets(tasksToSend, projects.filter((p) => p && p.id));
@@ -184,13 +187,13 @@ export const EodPanel: React.FC<EodPanelProps> = ({
               synthesizedLogs: buckets.map(templateLog),
               isAIGenerated: false,
               apiError: true,
-              notice: errData.error || plainAiMessage(`Failed with status ${resp.status}`),
+              notice: errData.error || plainAiMessage(resp.message),
             };
           } else {
-            throw new Error(errData.error || `Failed with status ${resp.status}`);
+            throw new Error(errData.error || resp.message);
           }
         } else {
-          data = await resp.json();
+          data = resp.data;
         }
       }
       const logs: SynthesizedLogItem[] = (Array.isArray(data.synthesizedLogs) ? data.synthesizedLogs : []).map((item: any) => ({
