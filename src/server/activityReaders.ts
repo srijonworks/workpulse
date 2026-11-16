@@ -6,6 +6,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { localDayToUtcRange } from '../utils/activity/time';
 import { clip, redactSecrets } from '../utils/activity/sanitize';
+import { readCodexHistory } from './readCodex';
+import { readOpenCodeHistory } from './readOpenCode';
 import type {
   ActivityItem,
   ActivitySource,
@@ -348,7 +350,7 @@ const OFF: SourceStatus = { ok: true, count: 0, note: 'Turned off in Settings' }
 /** Reads every switched-on source for one local day. Throws a plain-sentence Error on a bad folder. */
 export async function scanActivity(
   req: ScanRequest,
-  opts: { claudeDir?: string; env?: NodeJS.ProcessEnv; runGit?: GitRunner; folderTimeoutMs?: number } = {},
+  opts: { claudeDir?: string; codexDir?: string; openCodeDb?: string; env?: NodeJS.ProcessEnv; runGit?: GitRunner; folderTimeoutMs?: number } = {},
 ): Promise<ScanResponse> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(req.date)) throw new Error('Pick a valid date.');
   // A malformed path is a bug in the request and is refused. A folder that is simply gone (deleted,
@@ -368,7 +370,11 @@ export async function scanActivity(
   const claude = req.sources.claude ? await readClaudeHistory(paths, range, { claudeDir: opts.claudeDir }) : { items: [], status: OFF };
   const git = req.sources.git ? await readGitCommits(paths, range, { env: opts.env, runGit: opts.runGit }) : { items: [], status: OFF };
 
-  const status: Record<ActivitySource, SourceStatus> = { claude: claude.status, git: git.status };
+  // OpenCode and Codex are read only when asked for; one tool failing never costs the other sources.
+  const codex = req.sources.codex ? await readCodexHistory(paths, range, { codexDir: opts.codexDir }).catch(() => ({ items: [] as ActivityItem[], status: { ok: false, count: 0, note: "Couldn't read Codex history" } })) : null;
+  const opencode = req.sources.opencode ? await readOpenCodeHistory(paths, range, { dbPath: opts.openCodeDb }).catch(() => ({ items: [] as ActivityItem[], status: { ok: false, count: 0, note: "Couldn't read OpenCode history" } })) : null;
+
+  const status: ScanResponse['status'] = { claude: claude.status, git: git.status, ...(codex ? { codex: codex.status } : {}), ...(opencode ? { opencode: opencode.status } : {}) };
   const folderNotes = [
     skipped.length > 0 ? `Folder not found, skipped: ${skipped.join(', ')}` : '',
     slow.length > 0 ? `Folder did not answer, skipped: ${slow.join(', ')}` : '',
@@ -380,6 +386,6 @@ export async function scanActivity(
       status[carrier] = { ...status[carrier], note: [status[carrier].note, ...folderNotes].filter(Boolean).join('. ') };
     }
   }
-  const items = [...claude.items, ...git.items].sort((a, b) => a.time.localeCompare(b.time));
+  const items = [...claude.items, ...git.items, ...(codex?.items ?? []), ...(opencode?.items ?? [])].sort((a, b) => a.time.localeCompare(b.time));
   return { items, status };
 }

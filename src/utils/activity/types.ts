@@ -1,4 +1,4 @@
-export type ActivitySource = 'claude' | 'git';
+export type ActivitySource = 'claude' | 'git' | 'opencode' | 'codex';
 
 /** Where an item came from: a scanned source, or a done task of the day (merged into the same suggestions). */
 export type ItemSource = ActivitySource | 'task';
@@ -14,10 +14,13 @@ export interface ActivityFolder {
 export interface ActivitySources {
   claude: boolean;
   git: boolean;
+  /** OpenCode and Codex CLI history. Read only when true (the page turns them on after the user agreed to the notice). */
+  opencode?: boolean;
+  codex?: boolean;
 }
 
 export interface ActivityItem {
-  /** git:<hash> | claude:<sessionId>:<messageUuid>[:<n>] | task:<taskId> */
+  /** git:<hash> | claude:<sessionId>:<messageUuid>[:<n>] | opencode:<sessionId>:<messageId> | codex:<sessionId>:<ordinal> | task:<taskId> */
   id: string;
   source: ItemSource;
   /** The listed ActivityFolder.path this item belongs to (deepest match). */
@@ -42,7 +45,7 @@ export interface ScanRequest {
 
 export interface ScanResponse {
   items: ActivityItem[];
-  status: Record<ActivitySource, SourceStatus>;
+  status: Record<'claude' | 'git', SourceStatus> & Partial<Record<'opencode' | 'codex', SourceStatus>>;
 }
 
 export interface AiTask {

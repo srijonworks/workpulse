@@ -101,14 +101,15 @@ export async function loadSuggestions(args: PipelineArgs, deps: Deps = REAL): Pr
   return { suggestions, status: scanned.status, itemsKey, notice: aiTasks ? undefined : notice };
 }
 
-const LABEL: Record<ActivitySource, string> = { claude: 'Claude Code prompts', git: 'Git commits' };
+const LABEL: Record<ActivitySource, string> = { claude: 'Claude Code prompts', git: 'Git commits', opencode: 'OpenCode prompts', codex: 'Codex prompts' };
 
 /** One plain line per switched-on source: how much was found, and any note about it. */
-export function describeSources(sources: ActivitySources, status: Record<ActivitySource, SourceStatus>): string[] {
+export function describeSources(sources: ActivitySources, status: Partial<Record<ActivitySource, SourceStatus>>): string[] {
   const lines: string[] = [];
-  for (const source of ['claude', 'git'] as const) {
+  for (const source of ['claude', 'git', 'opencode', 'codex'] as const) {
     if (!sources[source]) continue;
     const s = status[source];
+    if (!s) continue;
     const head = !s.ok ? "couldn't read." : s.count === 0 ? 'nothing found.' : `${s.count} found.`;
     lines.push(`${LABEL[source]}: ${head}${s.note ? ` ${s.note}` : ''}`);
   }
@@ -120,5 +121,6 @@ export function describeSources(sources: ActivitySources, status: Record<Activit
  * notice is shown again when either changes, because the data then goes somewhere new.
  */
 export function noticeSignature(sources: ActivitySources, ai: ActivityAi): string {
-  return `${[sources.git ? 'git' : '', sources.claude ? 'claude' : ''].filter(Boolean).join('+')}|${ai}`;
+  // OpenCode and Codex are added only when on, so a notice agreed to before they existed stays valid until they are switched on.
+  return `${[sources.git ? 'git' : '', sources.claude ? 'claude' : '', sources.opencode ? 'opencode' : '', sources.codex ? 'codex' : ''].filter(Boolean).join('+')}|${ai}`;
 }
