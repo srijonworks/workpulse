@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isOurUrl, isSafeExternal } from './policy';
+import { crashDecision, isHiddenStart, isOurUrl, isSafeExternal } from './policy';
 
 const ORIGIN = 'http://localhost:38417';
 
@@ -39,5 +39,27 @@ describe('isSafeExternal', () => {
     expect(isSafeExternal('')).toBe(false);
     expect(isSafeExternal('C:\\Windows\\notepad.exe')).toBe(false);
     expect(isSafeExternal(null)).toBe(false);
+  });
+});
+
+describe('crashDecision', () => {
+  const now = 1_000_000;
+  it('reloads after a growing wait', () => {
+    expect(crashDecision([], now)).toEqual({ action: 'reload', delayMs: 1_000 });
+    expect(crashDecision([now - 10_000], now)).toEqual({ action: 'reload', delayMs: 5_000 });
+    expect(crashDecision([now - 20_000, now - 10_000], now)).toEqual({ action: 'reload', delayMs: 15_000 });
+  });
+  it('gives up on the fourth crash within five minutes', () => {
+    expect(crashDecision([now - 30_000, now - 20_000, now - 10_000], now)).toEqual({ action: 'give-up' });
+  });
+  it('forgets crashes older than five minutes', () => {
+    expect(crashDecision([now - 400_000, now - 380_000, now - 360_000], now)).toEqual({ action: 'reload', delayMs: 1_000 });
+  });
+});
+
+describe('isHiddenStart', () => {
+  it('is true only with the --hidden argument', () => {
+    expect(isHiddenStart(['WorkPulse.exe', '--hidden'])).toBe(true);
+    expect(isHiddenStart(['WorkPulse.exe'])).toBe(false);
   });
 });

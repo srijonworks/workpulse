@@ -22,6 +22,9 @@ export interface DesktopBridge {
   checkForUpdates(): void;
   installUpdate(): void;
   onUpdateState(cb: (s: UpdateState) => void): () => void;
+  /** The shell asks the page to save everything now (quit, sleep, lock, sign-out); call `flushed` when done. */
+  onFlush(cb: () => void): () => void;
+  flushed(): void;
 }
 
 export function desktopBridge(): DesktopBridge | null {

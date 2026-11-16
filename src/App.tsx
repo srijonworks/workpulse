@@ -90,6 +90,8 @@ import { OfflineNotice } from './components/OfflineNotice';
 import { SaveStatusBanner } from './components/SaveStatusBanner';
 import { DiskCopyBanner } from './components/DiskCopyBanner';
 import { useHeartbeat } from './hooks/useHeartbeat';
+import { writeHeartbeat } from './utils/heartbeat';
+import { desktopBridge } from './utils/desktopBridge';
 import { recordRepairs, repairData } from './utils/dataDoctor';
 import { saveSafetyCopy, useDiskCopy, useDiskCopyState } from './hooks/useDiskCopy';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
@@ -375,8 +377,11 @@ export default function App() {
     };
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pagehide', onPageHide);
+    // The desktop shell asks everyone to save before quit, sleep, lock and sign-out (see the effect below).
+    const offFlush = getEngine().registerFlush(flush);
 
     return () => {
+      offFlush();
       clearInterval(timerInterval);
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', onPageHide);
@@ -1339,6 +1344,19 @@ export default function App() {
   const diskCopyState = useDiskCopyState();
   // "Alive now" every 30 s: after a shutdown it says when the PC was last in use (the automatic day uses it later).
   useHeartbeat(dataLoaded);
+  // The desktop shell is about to quit, sleep, lock or sign out: write everything held in memory, then say so.
+  useEffect(() => {
+    const bridge = desktopBridge();
+    if (!bridge || !dataLoaded) return;
+    return bridge.onFlush(() => {
+      try {
+        getEngine().flushAll();
+        writeHeartbeat(localStorage, Date.now());
+      } finally {
+        bridge.flushed();
+      }
+    });
+  }, [dataLoaded]);
   const sheetBackup = useSheetBackup({
     enabled: dataLoaded,
     settings,

@@ -21,4 +21,7 @@ contextBridge.exposeInMainWorld('workpulseDesktop', {
   checkForUpdates: () => ipcRenderer.send('wp:update-check'),
   installUpdate: () => ipcRenderer.send('wp:update-install'),
   onUpdateState: (cb) => listen('wp:update', cb),
+  // the shell asks the page to save everything before quit, sleep, lock or sign-out; the page answers when done
+  onFlush: (cb) => listen('wp:flush', cb),
+  flushed: () => ipcRenderer.send('wp:flushed'),
 });

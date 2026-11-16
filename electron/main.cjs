@@ -78,9 +78,11 @@ async function start() {
   policy = require(path.join(__dirname, 'app', 'shell.cjs'));
   require(path.join(__dirname, 'app', 'server.cjs'));
   await waitForServer();
-  createWindow();
+  createWindow({ show: !policy.isHiddenStart(process.argv) });
   createTray();
   setupUpdates();
+  setupPowerFlush();
+  ensureLoginItem();
   started = true;
 }
 
@@ -186,8 +188,9 @@ ipcMain.on('wp:update-install', (event) => {
 
 let checkNow = () => {};
 
-function createWindow() {
+function createWindow(opts = {}) {
   win = new BrowserWindow({
+    show: opts.show !== false,
     width: 1360,
     height: 880,
     minWidth: 380,
@@ -198,6 +201,7 @@ function createWindow() {
   });
   Menu.setApplicationMenu(null);
   win.loadURL(ORIGIN);
+  watchPage(win);
   // Links to other sites (WhatsApp Web, the phone link, docs) open in the normal browser.
   // Only a web or mail link is handed over (never a file or a program-launching address), and a failure to open
   // it is logged, not thrown.
@@ -219,6 +223,71 @@ function createWindow() {
   });
 }
 
+// ---- Keeping the page alive ----
+// The page is where the day is tracked. If it crashes, hangs or fails to load, bring it back (waiting a little longer
+// each time) and say so in the log; if it keeps crashing, stop and tell the user instead of looping.
+const crashTimes = [];
+function watchPage(w) {
+  const wc = w.webContents;
+  wc.on('render-process-gone', (_e, details) => {
+    if (quitting || details.reason === 'clean-exit') return;
+    console.error('WorkPulse page crashed:', details.reason);
+    const d = policy.crashDecision(crashTimes, Date.now());
+    crashTimes.push(Date.now());
+    if (d.action === 'give-up') {
+      dialog.showErrorBox('WorkPulse keeps closing', 'The WorkPulse window crashed several times in a row. Your data is saved. Choose Quit in the tray menu and open WorkPulse again.');
+      return;
+    }
+    setTimeout(() => {
+      if (!w.isDestroyed() && !quitting) w.webContents.reload();
+    }, d.delayMs);
+  });
+  // A page that does not answer for 30 s is restarted.
+  let hangTimer = null;
+  w.on('unresponsive', () => {
+    clearTimeout(hangTimer);
+    hangTimer = setTimeout(() => {
+      if (!w.isDestroyed() && !quitting) {
+        console.error('WorkPulse page not responding: reloading');
+        w.webContents.forcefullyCrashRenderer();
+      }
+    }, 30000);
+  });
+  w.on('responsive', () => clearTimeout(hangTimer));
+  // The server was not ready, or went away for a moment: try again shortly.
+  wc.on('did-fail-load', (_e, code, _desc, url, isMain) => {
+    if (!isMain || code === -3 || quitting) return; // -3 = cancelled by a navigation
+    console.error('WorkPulse page failed to load:', code, url);
+    setTimeout(() => {
+      if (!w.isDestroyed() && !quitting) w.loadURL(ORIGIN);
+    }, 3000);
+  });
+}
+
+// ---- Saving before the app stops ----
+// Before quitting, sleeping, locking or signing out, the page is asked to write everything it holds in memory (running
+// timers, anything that was not saved). It answers on 'wp:flushed'; we wait at most 1.5 s, then go on.
+let flushWaiter = null;
+function flushPage() {
+  return new Promise((resolve) => {
+    if (!win || win.isDestroyed() || win.webContents.isLoading()) return resolve();
+    const done = () => {
+      clearTimeout(timer);
+      flushWaiter = null;
+      Promise.resolve()
+        .then(() => win && !win.isDestroyed() && win.webContents.session.flushStorageData())
+        .catch(() => {})
+        .then(resolve);
+    };
+    const timer = setTimeout(done, 1500);
+    flushWaiter = done;
+    win.webContents.send('wp:flush');
+  });
+}
+ipcMain.on('wp:flushed', (event) => {
+  if (fromOurPage(event) && flushWaiter) flushWaiter();
+});
+
 function showWindow() {
   // If the window was ever lost (it is only ever hidden), make a new one instead of leaving a tray with nothing behind it.
   if (!win || win.isDestroyed()) {
@@ -239,9 +308,9 @@ function createTray() {
       {
         label: 'Start with Windows',
         type: 'checkbox',
-        checked: app.getLoginItemSettings().openAtLogin,
+        checked: app.getLoginItemSettings({ args: LOGIN_ARGS }).openAtLogin,
         click: (item) => {
-          app.setLoginItemSettings({ openAtLogin: item.checked });
+          app.setLoginItemSettings({ openAtLogin: item.checked, args: LOGIN_ARGS });
         },
       },
       {
@@ -384,9 +453,35 @@ ipcMain.on('wp:command', (event, cmd) => {
   if (win && !win.isDestroyed()) win.webContents.send('wp:command', cmd);
 });
 
-app.on('before-quit', () => {
+let flushedForQuit = false;
+app.on('before-quit', (e) => {
   quitting = true;
+  if (flushedForQuit || !started) return;
+  e.preventDefault();
+  flushedForQuit = true;
+  flushPage().then(() => app.quit());
 });
+
+function setupPowerFlush() {
+  const { powerMonitor } = require('electron');
+  for (const ev of ['suspend', 'lock-screen']) powerMonitor.on(ev, () => void flushPage());
+  // Windows is signing out or shutting down: ask the page to save at once (it saves synchronously; we cannot wait here).
+  if (win) win.on('session-end', () => win && !win.isDestroyed() && win.webContents.send('wp:flush'));
+}
+
+// WorkPulse starts with Windows, hidden in the tray. This is set once (a later choice in the tray menu is kept).
+const LOGIN_ARGS = ['--hidden'];
+function ensureLoginItem() {
+  if (TEST_PROFILE || !app.isPackaged) return;
+  const marker = path.join(app.getPath('userData'), 'login-item-set');
+  if (fs.existsSync(marker)) return;
+  try {
+    app.setLoginItemSettings({ openAtLogin: true, args: LOGIN_ARGS });
+    fs.writeFileSync(marker, '1');
+  } catch (err) {
+    console.error('Could not set start with Windows:', err && err.message);
+  }
+}
 
 // Electron quits when its last window closes. WorkPulse lives in the tray, so a lost window must not end it:
 // only "Quit" in the tray does.
