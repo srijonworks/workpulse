@@ -65,6 +65,34 @@ export const ActivityFoldersSettings: React.FC<ActivityFoldersSettingsProps> = (
             </span>
           </span>
         </label>
+        <label className="flex items-start gap-2.5 text-[length:var(--fs-small)] text-[var(--text-main)] cursor-pointer">
+          <input
+            type="checkbox"
+            checked={sources.opencode !== false}
+            onChange={(e) => onSourcesChange({ ...sources, opencode: e.target.checked })}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="font-semibold">Include OpenCode prompts</span>
+            <span className="block text-[var(--text-muted)]">
+              Reads your OpenCode history on this computer for these folders: the first line of your prompts only.
+            </span>
+          </span>
+        </label>
+        <label className="flex items-start gap-2.5 text-[length:var(--fs-small)] text-[var(--text-main)] cursor-pointer">
+          <input
+            type="checkbox"
+            checked={sources.codex !== false}
+            onChange={(e) => onSourcesChange({ ...sources, codex: e.target.checked })}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="font-semibold">Include Codex prompts</span>
+            <span className="block text-[var(--text-muted)]">
+              Reads your Codex CLI history on this computer for these folders: the first line of your prompts only.
+            </span>
+          </span>
+        </label>
       </fieldset>
 
       <div className="space-y-3">

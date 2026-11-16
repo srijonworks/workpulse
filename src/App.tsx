@@ -121,6 +121,8 @@ export default function App() {
     projects.filter((p) => p.trashedAt).map((p) => p.id),
     settings.activityUseGit,
     settings.activityUseClaude,
+    settings.activityUseOpenCode,
+    settings.activityUseCodex,
     settings.activityAi,
   ]);
   useEffect(() => {
@@ -1508,14 +1510,17 @@ export default function App() {
     planDay: useStableCallback(() => openPlan([])),
   };
 
-  const sourcesGit = sourcesFromSettings(settings).git;
-  const sourcesClaude = sourcesFromSettings(settings).claude;
+  const activitySources = sourcesFromSettings(settings);
+  const sourcesGit = activitySources.git;
+  const sourcesClaude = activitySources.claude;
+  const sourcesOpenCode = activitySources.opencode;
+  const sourcesCodex = activitySources.codex;
   const ai = aiFromSettings(settings);
   const autoScan = autoScanFromSettings(settings);
   const activityProps: TodayActivityProps = useMemo(
     () => ({
       folders,
-      sources: { git: sourcesGit, claude: sourcesClaude },
+      sources: { git: sourcesGit, claude: sourcesClaude, opencode: sourcesOpenCode, codex: sourcesCodex },
       ai,
       autoScan,
       geminiApiKey: settings.geminiApiKey,
@@ -1523,7 +1528,7 @@ export default function App() {
       onOpenSettings: h.openSettings,
     }),
     // h.* never change identity, so they are not dependencies.
-    [folders, sourcesGit, sourcesClaude, ai, autoScan, settings.geminiApiKey],
+    [folders, sourcesGit, sourcesClaude, sourcesOpenCode, sourcesCodex, ai, autoScan, settings.geminiApiKey],
   );
 
   const hasSheet = Boolean(settings.googleScriptUrl);

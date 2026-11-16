@@ -369,7 +369,7 @@ export const ActivitySuggestionsPanel: React.FC<ActivitySuggestionsPanelProps> =
   ) : view === 'check' ? (
     <div className="py-1 space-y-3">
       <p className="text-[length:var(--fs-small)] text-[var(--text-muted)]">
-        Turn today's commits{sources.claude ? ' and Claude Code prompts' : ''} into log lines you can tick and add. Nothing is read until you ask.
+        Turn today's commits{sources.claude || sources.opencode || sources.codex ? ' and AI-tool prompts' : ''} into log lines you can tick and add. Nothing is read until you ask.
       </p>
       <button type="button" onClick={start} className={PRIMARY}>
         Check activity
@@ -386,6 +386,9 @@ export const ActivitySuggestionsPanel: React.FC<ActivitySuggestionsPanelProps> =
             {sources.git && <li>The subjects of your git commits go to {ai === 'claude' ? 'Claude, through the Claude Code on this computer,' : 'Gemini'} so it can group them and write the log text.</li>}
             {sources.claude && (
               <li>The first line of your Claude Code prompts, session titles and edited file names go to {ai === 'claude' ? 'Claude' : 'Gemini'} too.</li>
+            )}
+            {(sources.opencode || sources.codex) && (
+              <li>The first line of your {[sources.opencode && 'OpenCode', sources.codex && 'Codex'].filter(Boolean).join(' and ')} prompts goes to {ai === 'claude' ? 'Claude' : 'Gemini'} too.</li>
             )}
             {(doneTasks?.length ?? 0) > 0 && <li>The titles of your done tasks go to {ai === 'claude' ? 'Claude' : 'Gemini'} too, so it can match them with your activity.</li>}
             <li>Anything that looks like a key or password is hidden first.</li>

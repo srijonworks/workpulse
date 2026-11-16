@@ -267,7 +267,7 @@ async function startServer() {
       const result = await scanActivity({
         date: body.date,
         folders: body.folders,
-        sources: { claude: body.sources.claude === true, git: body.sources.git === true },
+        sources: { claude: body.sources.claude === true, git: body.sources.git === true, opencode: body.sources.opencode === true, codex: body.sources.codex === true },
       });
       return res.json(result);
     } catch (err: any) {

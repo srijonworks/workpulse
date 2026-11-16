@@ -54,7 +54,7 @@ const REAL: Deps = { scan: scanActivityApi, suggest: suggestTasksApi };
  * throws (the dialog shows it); a failed AI call never does.
  */
 export async function loadSuggestions(args: PipelineArgs, deps: Deps = REAL): Promise<PipelineResult> {
-  const canScan = args.folders.length > 0 && (args.sources.claude || args.sources.git);
+  const canScan = args.folders.length > 0 && (args.sources.claude || args.sources.git || args.sources.opencode || args.sources.codex);
   const empty: ScanResponse = {
     items: [],
     status: { claude: { ok: true, count: 0, note: 'Turned off in Settings' }, git: { ok: true, count: 0, note: 'Turned off in Settings' } },

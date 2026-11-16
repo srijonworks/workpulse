@@ -82,7 +82,7 @@ export function buildActivityPrompt(
       .map((it) => {
         const short = `i${++n}`;
         shortToId[short] = it.id;
-        const kind = it.source === 'git' ? 'commit' : it.source === 'task' ? 'done task' : 'claude';
+        const kind = it.source === 'git' ? 'commit' : it.source === 'task' ? 'done task' : it.source === 'opencode' ? 'opencode' : it.source === 'codex' ? 'codex' : 'claude';
         return `[${short}] (${kind}) ${clip(redactSecrets(it.text), ITEM_TEXT_MAX)}`;
       });
     sections.push(`Project: ${name}\n${rows.join('\n')}`);

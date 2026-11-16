@@ -110,6 +110,9 @@ export interface AppSettings {
   // Look for new activity every 5 minutes while Today or End my day is open. Absent = on; false = off.
   activityAutoScan?: boolean;
   activityUseGit?: boolean;
+  // OpenCode and Codex CLI prompts: on unless set to false.
+  activityUseOpenCode?: boolean;
+  activityUseCodex?: boolean;
   // Which AI groups the activity into suggestions. Absent = Claude Code.
   activityAi?: ActivityAi;
   // The project last used when a task or log was submitted from Today's inputs or Plan your day. Absent = first active project.

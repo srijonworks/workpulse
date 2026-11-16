@@ -1199,7 +1199,7 @@ def sync_button(s):
 
 
 ACK_KEY = "workpulse_activity_notice"
-ACK_VALUE = "git+claude|claude"  # the data notice for the default sources and AI writer
+ACK_VALUE = "git+claude+opencode+codex|claude"  # the data notice for the default sources and AI writer
 
 
 def _open_end_day_with_done_task(s):
