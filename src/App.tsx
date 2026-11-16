@@ -123,6 +123,7 @@ export default function App() {
     settings.activityUseClaude,
     settings.activityUseOpenCode,
     settings.activityUseCodex,
+    settings.activityUseDocs,
     settings.activityAi,
   ]);
   useEffect(() => {
@@ -1515,12 +1516,13 @@ export default function App() {
   const sourcesClaude = activitySources.claude;
   const sourcesOpenCode = activitySources.opencode;
   const sourcesCodex = activitySources.codex;
+  const sourcesDocs = activitySources.docs;
   const ai = aiFromSettings(settings);
   const autoScan = autoScanFromSettings(settings);
   const activityProps: TodayActivityProps = useMemo(
     () => ({
       folders,
-      sources: { git: sourcesGit, claude: sourcesClaude, opencode: sourcesOpenCode, codex: sourcesCodex },
+      sources: { git: sourcesGit, claude: sourcesClaude, opencode: sourcesOpenCode, codex: sourcesCodex, docs: sourcesDocs },
       ai,
       autoScan,
       geminiApiKey: settings.geminiApiKey,
@@ -1528,7 +1530,7 @@ export default function App() {
       onOpenSettings: h.openSettings,
     }),
     // h.* never change identity, so they are not dependencies.
-    [folders, sourcesGit, sourcesClaude, sourcesOpenCode, sourcesCodex, ai, autoScan, settings.geminiApiKey],
+    [folders, sourcesGit, sourcesClaude, sourcesOpenCode, sourcesCodex, sourcesDocs, ai, autoScan, settings.geminiApiKey],
   );
 
   const hasSheet = Boolean(settings.googleScriptUrl);

@@ -29,19 +29,20 @@ export function addActivityFolder(folders: ActivityFolder[], rawPath: string, pr
 }
 
 /** Git commits, Claude Code, OpenCode and Codex prompts are all on unless switched off. */
-export function sourcesFromSettings(s: Pick<AppSettings, 'activityUseClaude' | 'activityUseGit' | 'activityUseOpenCode' | 'activityUseCodex'>): ActivitySources {
-  return { claude: s.activityUseClaude !== false, git: s.activityUseGit !== false, opencode: s.activityUseOpenCode !== false, codex: s.activityUseCodex !== false };
+export function sourcesFromSettings(s: Pick<AppSettings, 'activityUseClaude' | 'activityUseGit' | 'activityUseOpenCode' | 'activityUseCodex' | 'activityUseDocs'>): ActivitySources {
+  return { claude: s.activityUseClaude !== false, git: s.activityUseGit !== false, opencode: s.activityUseOpenCode !== false, codex: s.activityUseCodex !== false, docs: s.activityUseDocs !== false };
 }
 
 /** The settings fields for these choices; only values that differ from the defaults are stored. */
 export function activityFieldsFromSources(
   sources: ActivitySources,
-): Pick<AppSettings, 'activityUseClaude' | 'activityUseGit' | 'activityUseOpenCode' | 'activityUseCodex'> {
+): Pick<AppSettings, 'activityUseClaude' | 'activityUseGit' | 'activityUseOpenCode' | 'activityUseCodex' | 'activityUseDocs'> {
   return {
     activityUseClaude: sources.claude ? undefined : false,
     activityUseGit: sources.git ? undefined : false,
     activityUseOpenCode: sources.opencode !== false ? undefined : false,
     activityUseCodex: sources.codex !== false ? undefined : false,
+    activityUseDocs: sources.docs !== false ? undefined : false,
   };
 }
 

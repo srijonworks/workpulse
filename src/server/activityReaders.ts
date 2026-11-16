@@ -8,6 +8,8 @@ import { localDayToUtcRange } from '../utils/activity/time';
 import { clip, redactSecrets } from '../utils/activity/sanitize';
 import { readCodexHistory } from './readCodex';
 import { readOpenCodeHistory } from './readOpenCode';
+import { readDocuments } from './readDocuments';
+import { readGitChanges } from './gitChanges';
 import type {
   ActivityItem,
   ActivitySource,
@@ -368,13 +370,27 @@ export async function scanActivity(
 
   const range = localDayToUtcRange(req.date);
   const claude = req.sources.claude ? await readClaudeHistory(paths, range, { claudeDir: opts.claudeDir }) : { items: [], status: OFF };
-  const git = req.sources.git ? await readGitCommits(paths, range, { env: opts.env, runGit: opts.runGit }) : { items: [], status: OFF };
+  const git = req.sources.git ? await readGitCommits(paths, range, { env: opts.env, runGit: opts.runGit }) : { items: [] as ActivityItem[], status: OFF };
+  if (req.sources.git) {
+    // Work not committed yet counts as git activity. A failure here never hides the commits.
+    const runGit: GitRunner =
+      opts.runGit ??
+      ((args, o) => execFileAsync('git', args, { cwd: o.cwd, env: opts.env ?? process.env, timeout: o.timeoutMs, maxBuffer: 10 * 1024 * 1024, windowsHide: true }));
+    try {
+      const wip = await readGitChanges(paths, range, runGit);
+      git.items = [...git.items, ...wip.items];
+      git.status = { ...git.status, count: git.items.length };
+    } catch {
+      // uncommitted changes are a bonus
+    }
+  }
+  const docs = req.sources.docs ? await readDocuments(paths, range).catch(() => ({ items: [] as ActivityItem[], status: { ok: false, count: 0, note: "Couldn't look through the folders for documents" } })) : null;
 
   // OpenCode and Codex are read only when asked for; one tool failing never costs the other sources.
   const codex = req.sources.codex ? await readCodexHistory(paths, range, { codexDir: opts.codexDir }).catch(() => ({ items: [] as ActivityItem[], status: { ok: false, count: 0, note: "Couldn't read Codex history" } })) : null;
   const opencode = req.sources.opencode ? await readOpenCodeHistory(paths, range, { dbPath: opts.openCodeDb }).catch(() => ({ items: [] as ActivityItem[], status: { ok: false, count: 0, note: "Couldn't read OpenCode history" } })) : null;
 
-  const status: ScanResponse['status'] = { claude: claude.status, git: git.status, ...(codex ? { codex: codex.status } : {}), ...(opencode ? { opencode: opencode.status } : {}) };
+  const status: ScanResponse['status'] = { claude: claude.status, git: git.status, ...(codex ? { codex: codex.status } : {}), ...(opencode ? { opencode: opencode.status } : {}), ...(docs ? { docs: docs.status } : {}) };
   const folderNotes = [
     skipped.length > 0 ? `Folder not found, skipped: ${skipped.join(', ')}` : '',
     slow.length > 0 ? `Folder did not answer, skipped: ${slow.join(', ')}` : '',
@@ -386,6 +402,6 @@ export async function scanActivity(
       status[carrier] = { ...status[carrier], note: [status[carrier].note, ...folderNotes].filter(Boolean).join('. ') };
     }
   }
-  const items = [...claude.items, ...git.items, ...(codex?.items ?? []), ...(opencode?.items ?? [])].sort((a, b) => a.time.localeCompare(b.time));
+  const items = [...claude.items, ...git.items, ...(codex?.items ?? []), ...(opencode?.items ?? []), ...(docs?.items ?? [])].sort((a, b) => a.time.localeCompare(b.time));
   return { items, status };
 }

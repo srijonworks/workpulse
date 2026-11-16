@@ -39,20 +39,20 @@ describe('addActivityFolder', () => {
 
 describe('sourcesFromSettings / activityFieldsFromSources', () => {
   it('has every source on by default', () => {
-    expect(sourcesFromSettings({})).toEqual({ claude: true, git: true, opencode: true, codex: true });
-    expect(sourcesFromSettings({ activityUseClaude: false })).toEqual({ claude: false, git: true, opencode: true, codex: true });
-    expect(sourcesFromSettings({ activityUseCodex: false, activityUseOpenCode: false })).toEqual({ claude: true, git: true, opencode: false, codex: false });
+    expect(sourcesFromSettings({})).toEqual({ claude: true, git: true, opencode: true, codex: true, docs: true });
+    expect(sourcesFromSettings({ activityUseClaude: false })).toEqual({ claude: false, git: true, opencode: true, codex: true, docs: true });
+    expect(sourcesFromSettings({ activityUseCodex: false, activityUseOpenCode: false })).toEqual({ claude: true, git: true, opencode: false, codex: false, docs: true });
   });
   it('reads explicit choices', () => {
-    expect(sourcesFromSettings({ activityUseClaude: true, activityUseGit: false })).toEqual({ claude: true, git: false, opencode: true, codex: true });
+    expect(sourcesFromSettings({ activityUseClaude: true, activityUseGit: false })).toEqual({ claude: true, git: false, opencode: true, codex: true, docs: true });
   });
   it('stores only what differs from the defaults', () => {
-    expect(activityFieldsFromSources({ claude: true, git: true })).toEqual({ activityUseClaude: undefined, activityUseGit: undefined, activityUseOpenCode: undefined, activityUseCodex: undefined });
-    expect(activityFieldsFromSources({ claude: false, git: false, opencode: false, codex: false })).toEqual({ activityUseClaude: false, activityUseGit: false, activityUseOpenCode: false, activityUseCodex: false });
+    expect(activityFieldsFromSources({ claude: true, git: true })).toEqual({ activityUseClaude: undefined, activityUseGit: undefined, activityUseOpenCode: undefined, activityUseCodex: undefined, activityUseDocs: undefined });
+    expect(activityFieldsFromSources({ claude: false, git: false, opencode: false, codex: false, docs: false })).toEqual({ activityUseClaude: false, activityUseGit: false, activityUseOpenCode: false, activityUseCodex: false, activityUseDocs: false });
   });
   it('round-trips', () => {
     for (const claude of [true, false]) for (const git of [true, false]) for (const codex of [true, false]) {
-      const s = { claude, git, opencode: !codex, codex };
+      const s = { claude, git, opencode: !codex, codex, docs: git };
       expect(sourcesFromSettings(activityFieldsFromSources(s))).toEqual(s);
     }
   });

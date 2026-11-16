@@ -93,6 +93,20 @@ export const ActivityFoldersSettings: React.FC<ActivityFoldersSettingsProps> = (
             </span>
           </span>
         </label>
+        <label className="flex items-start gap-2.5 text-[length:var(--fs-small)] text-[var(--text-main)] cursor-pointer">
+          <input
+            type="checkbox"
+            checked={sources.docs !== false}
+            onChange={(e) => onSourcesChange({ ...sources, docs: e.target.checked })}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="font-semibold">Include documents</span>
+            <span className="block text-[var(--text-muted)]">
+              Word, Excel, PowerPoint and PDF files you changed today in these folders. Only the file name and time are used; files are never opened.
+            </span>
+          </span>
+        </label>
       </fieldset>
 
       <div className="space-y-3">

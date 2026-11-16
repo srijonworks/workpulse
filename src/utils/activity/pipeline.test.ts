@@ -114,7 +114,7 @@ describe('noticeSignature', () => {
   it('changes when a source is switched on, so the data notice is shown again', () => {
     expect(noticeSignature({ claude: false, git: true }, 'claude')).toBe('git|claude');
     expect(noticeSignature({ claude: true, git: true }, 'claude')).toBe('git+claude|claude');
-    expect(noticeSignature({ claude: true, git: true, opencode: true, codex: true }, 'claude')).toBe('git+claude+opencode+codex|claude');
+    expect(noticeSignature({ claude: true, git: true, opencode: true, codex: true, docs: true }, 'claude')).toBe('git+claude+opencode+codex+docs|claude');
     expect(noticeSignature({ claude: false, git: false }, 'claude')).toBe('|claude');
   });
   it('changes when the AI is changed, because the data goes somewhere else', () => {

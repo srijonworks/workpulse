@@ -54,7 +54,7 @@ const REAL: Deps = { scan: scanActivityApi, suggest: suggestTasksApi };
  * throws (the dialog shows it); a failed AI call never does.
  */
 export async function loadSuggestions(args: PipelineArgs, deps: Deps = REAL): Promise<PipelineResult> {
-  const canScan = args.folders.length > 0 && (args.sources.claude || args.sources.git || args.sources.opencode || args.sources.codex);
+  const canScan = args.folders.length > 0 && (args.sources.claude || args.sources.git || args.sources.opencode || args.sources.codex || args.sources.docs);
   const empty: ScanResponse = {
     items: [],
     status: { claude: { ok: true, count: 0, note: 'Turned off in Settings' }, git: { ok: true, count: 0, note: 'Turned off in Settings' } },
@@ -101,12 +101,12 @@ export async function loadSuggestions(args: PipelineArgs, deps: Deps = REAL): Pr
   return { suggestions, status: scanned.status, itemsKey, notice: aiTasks ? undefined : notice };
 }
 
-const LABEL: Record<ActivitySource, string> = { claude: 'Claude Code prompts', git: 'Git commits', opencode: 'OpenCode prompts', codex: 'Codex prompts' };
+const LABEL: Record<ActivitySource, string> = { claude: 'Claude Code prompts', git: 'Git commits', opencode: 'OpenCode prompts', codex: 'Codex prompts', docs: 'Documents' };
 
 /** One plain line per switched-on source: how much was found, and any note about it. */
 export function describeSources(sources: ActivitySources, status: Partial<Record<ActivitySource, SourceStatus>>): string[] {
   const lines: string[] = [];
-  for (const source of ['claude', 'git', 'opencode', 'codex'] as const) {
+  for (const source of ['claude', 'git', 'opencode', 'codex', 'docs'] as const) {
     if (!sources[source]) continue;
     const s = status[source];
     if (!s) continue;
@@ -122,5 +122,5 @@ export function describeSources(sources: ActivitySources, status: Partial<Record
  */
 export function noticeSignature(sources: ActivitySources, ai: ActivityAi): string {
   // OpenCode and Codex are added only when on, so a notice agreed to before they existed stays valid until they are switched on.
-  return `${[sources.git ? 'git' : '', sources.claude ? 'claude' : '', sources.opencode ? 'opencode' : '', sources.codex ? 'codex' : ''].filter(Boolean).join('+')}|${ai}`;
+  return `${[sources.git ? 'git' : '', sources.claude ? 'claude' : '', sources.opencode ? 'opencode' : '', sources.codex ? 'codex' : '', sources.docs ? 'docs' : ''].filter(Boolean).join('+')}|${ai}`;
 }

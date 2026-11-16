@@ -113,6 +113,8 @@ export interface AppSettings {
   // OpenCode and Codex CLI prompts: on unless set to false.
   activityUseOpenCode?: boolean;
   activityUseCodex?: boolean;
+  // Document files worked on (names and times only): on unless set to false.
+  activityUseDocs?: boolean;
   // Which AI groups the activity into suggestions. Absent = Claude Code.
   activityAi?: ActivityAi;
   // The project last used when a task or log was submitted from Today's inputs or Plan your day. Absent = first active project.

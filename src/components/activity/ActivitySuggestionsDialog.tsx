@@ -390,6 +390,7 @@ export const ActivitySuggestionsPanel: React.FC<ActivitySuggestionsPanelProps> =
             {(sources.opencode || sources.codex) && (
               <li>The first line of your {[sources.opencode && 'OpenCode', sources.codex && 'Codex'].filter(Boolean).join(' and ')} prompts goes to {ai === 'claude' ? 'Claude' : 'Gemini'} too.</li>
             )}
+            {sources.docs && <li>The names of documents you changed go to {ai === 'claude' ? 'Claude' : 'Gemini'} too (never their contents).</li>}
             {(doneTasks?.length ?? 0) > 0 && <li>The titles of your done tasks go to {ai === 'claude' ? 'Claude' : 'Gemini'} too, so it can match them with your activity.</li>}
             <li>Anything that looks like a key or password is hidden first.</li>
           </>

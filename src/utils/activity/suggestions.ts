@@ -71,12 +71,14 @@ function evidenceOf(items: ActivityItem[]): string {
   const sessions = sessionsOf('claude');
   const openCode = sessionsOf('opencode');
   const codex = sessionsOf('codex');
+  const docs = items.filter((i) => i.source === 'docs').length;
   const doneTasks = items.filter((i) => i.source === 'task').length;
   const parts: string[] = [];
   if (doneTasks > 0) parts.push(`${doneTasks} done ${doneTasks === 1 ? 'task' : 'tasks'}`);
   if (commits > 0) parts.push(`${commits} commit${commits === 1 ? '' : 's'}`);
   if (sessions > 0) parts.push(`${sessions} Claude session${sessions === 1 ? '' : 's'}`);
   if (openCode > 0) parts.push(`${openCode} OpenCode session${openCode === 1 ? '' : 's'}`);
+  if (docs > 0) parts.push(`${docs} document${docs === 1 ? '' : 's'}`);
   if (codex > 0) parts.push(`${codex} Codex session${codex === 1 ? '' : 's'}`);
   return parts.join(', ') || 'activity';
 }
