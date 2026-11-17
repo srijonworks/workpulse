@@ -31,7 +31,7 @@ export const TimeWidget: React.FC<{ snap: WidgetSnapshot | null }> = ({ snap }) 
         : 'Waiting for WorkPulse…'
       : c.phase === 'out'
         ? `In ${localTimeStr(new Date(c.clockInMs as number))} · out ${localTimeStr(new Date(Date.parse(snap?.clockOut as string)))}`
-        : `Leave ${localTimeStr(new Date(c.leaveAtMs as number))}`;
+        : `In ${localTimeStr(new Date(c.clockInMs as number))} · Leave ${localTimeStr(new Date(c.leaveAtMs as number))}`;
   const figures = snap && c.phase !== 'off' ? `Worked ${formatHm(c.workedSec)} / Logged ${formatMinutes(snap.loggedMinutes)}` : '';
   const problem = snap?.problems[0];
   const action =
