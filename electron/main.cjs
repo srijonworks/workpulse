@@ -13,6 +13,8 @@ if (TEST_PROFILE) app.setPath('userData', process.env.WORKPULSE_USER_DATA);
 const PORT = TEST_PROFILE && Number(process.env.WORKPULSE_TEST_PORT) > 0 ? Number(process.env.WORKPULSE_TEST_PORT) : 38417;
 const ORIGIN = `http://localhost:${PORT}`;
 const PRELOAD = path.join(__dirname, 'preload.cjs');
+// The suitcase icon: the window, the taskbar and the tray. The installer and the .exe use build/icon.ico.
+const APP_ICON = nativeImage.createFromPath(path.join(__dirname, 'icon.png'));
 
 process.env.PORT = String(PORT);
 process.env.HOST = '127.0.0.1';
@@ -191,6 +193,7 @@ let checkNow = () => {};
 function createWindow(opts = {}) {
   win = new BrowserWindow({
     show: opts.show !== false,
+    icon: APP_ICON,
     width: 1360,
     height: 880,
     minWidth: 380,
@@ -300,7 +303,7 @@ function showWindow() {
 }
 
 function createTray() {
-  tray = new Tray(nativeImage.createFromPath(process.execPath).resize({ width: 16, height: 16 }));
+  tray = new Tray(APP_ICON.isEmpty() ? nativeImage.createFromPath(process.execPath).resize({ width: 16, height: 16 }) : APP_ICON.resize({ width: 16, height: 16 }));
   tray.setToolTip('WorkPulse');
   const build = () =>
     Menu.buildFromTemplate([

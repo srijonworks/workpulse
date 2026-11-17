@@ -21,10 +21,12 @@
     },
     "files": [
       "*.cjs",
+      "icon.png",
       "app/**/*",
       "package.json"
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis"
       ]
