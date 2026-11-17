@@ -8,7 +8,7 @@
 - NOT TESTED for real: the v6 script on Google (re-paste + New version needed), a real standup email, the packaged installer (`desktop:pack`), widgets and tray in a running Electron, renderer crash recovery, flush on quit.
 - Stage 2 leftovers: server as a restartable utility process, crash-loop safe mode, hung-instance takeover.
 - Phone-added logs (`phoneAddLog`) stay in the Sheet; nothing pulls them into the desktop. `origin` is not sent in snapshots.
-- Settings UI for `autoDayEnabled`, `activityAutoProjects`, watch folder and ignored folders; merge-projects; Undo for auto clock-in/out.
+- Merge-projects; Undo for auto clock-in/out. (Settings -> Automatic day now has the switches, projects folder and skipped folders.)
 - Only the `app` and `email` health entries report; other subsystems read as working until they call `reportOk/reportFail`.
 - Smoke has no checks for System status, delivery or the widget commands.
 

@@ -77,6 +77,7 @@ const SECTIONS = [
   { id: 'sheet', label: 'Google Sheet' },
   { id: 'phone', label: 'Phone & evening email' },
   { id: 'ai', label: 'AI' },
+  { id: 'autoday', label: 'Automatic day' },
   { id: 'activity', label: 'Activity suggestions' },
   { id: 'data', label: 'Data & backup' },
   { id: 'updates', label: 'App updates' },
@@ -189,6 +190,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // Activity suggestions state
   const [activitySources, setActivitySources] = useState<ActivitySources>(sourcesFromSettings(settings));
   const [activityAutoScan, setActivityAutoScan] = useState<boolean>(autoScanFromSettings(settings));
+  // Automatic day: the start-of-day popup and clock-out safety net, projects made from folders, where to look, what to skip.
+  const [autoDayOn, setAutoDayOn] = useState(settings.autoDayEnabled !== false);
+  const [autoProjectsOn, setAutoProjectsOn] = useState(settings.activityAutoProjects !== false);
+  const [watchFolder, setWatchFolder] = useState(settings.activityWatchFolder ?? '');
+  const [unignored, setUnignored] = useState<string[]>([]);
   const [activityAi, setActivityAi] = useState<ActivityAi>(aiFromSettings(settings));
 
   const goTo = (id: SectionId) => {
@@ -235,6 +241,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       ...activityFieldsFromSources(activitySources),
       activityAi: aiField(activityAi),
       activityAutoScan: activityAutoScan ? undefined : false,
+      autoDayEnabled: autoDayOn ? undefined : false,
+      activityAutoProjects: autoProjectsOn ? undefined : false,
+      activityWatchFolder: watchFolder.trim() || undefined,
+      // read from the live settings, so a folder ignored since this page opened (a project deleted for good) is kept
+      activityIgnoredFolders: (settings.activityIgnoredFolders ?? []).filter((f) => !unignored.includes(f)).length > 0 ? (settings.activityIgnoredFolders ?? []).filter((f) => !unignored.includes(f)) : undefined,
     };
     onSaveSettings(updated);
     onNotify('All settings successfully saved!', 'success');
@@ -656,6 +667,67 @@ Your current Gemini API key is kept. Export a backup first if you want to keep y
                   className={FIELD}
                 />
               </div>
+            </div>
+          </Section>
+
+          <Section
+            id="autoday"
+            title="Automatic day"
+            intro="WorkPulse can start and close your day for you. Everything it adds can be undone, and logs you write by hand are never touched."
+          >
+            <div className="space-y-5">
+              <label className="flex items-start gap-2.5 text-[length:var(--fs-small)] text-[var(--text-main)] cursor-pointer">
+                <input type="checkbox" checked={autoDayOn} onChange={(e) => setAutoDayOn(e.target.checked)} className="mt-0.5" />
+                <span>
+                  <span className="font-semibold">Start and close the day automatically</span>
+                  <span className="block text-[var(--text-muted)]">
+                    Asks you to clock in when you start working (it confirms itself after 10 minutes if you are at the PC), closes a day you forgot at the
+                    last time the PC was in use, and adds the day&apos;s logs, standup and email after you clock out. Turn it off to do all of this yourself.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2.5 text-[length:var(--fs-small)] text-[var(--text-main)] cursor-pointer">
+                <input type="checkbox" checked={autoProjectsOn} onChange={(e) => setAutoProjectsOn(e.target.checked)} className="mt-0.5" />
+                <span>
+                  <span className="font-semibold">Create projects from my folders</span>
+                  <span className="block text-[var(--text-muted)]">
+                    A folder in your projects folder becomes a project once you have worked in it (a commit, a changed document or a few AI prompts).
+                  </span>
+                </span>
+              </label>
+              <div>
+                <label htmlFor="watch-folder" className={LABEL}>
+                  Projects folder
+                </label>
+                <input
+                  id="watch-folder"
+                  value={watchFolder}
+                  onChange={(e) => setWatchFolder(e.target.value)}
+                  placeholder="Automatic, from the folders you linked"
+                  spellCheck={false}
+                  autoComplete="off"
+                  className={FIELD}
+                />
+                <p className={HINT}>The folder that holds your projects, like E:\Projects. Leave it empty to use the parent of the folders you linked.</p>
+              </div>
+              {(settings.activityIgnoredFolders ?? []).filter((f) => !unignored.includes(f)).length > 0 && (
+                <div>
+                  <h4 className="text-[length:var(--fs-small)] font-semibold text-[var(--text-main)]">Folders skipped</h4>
+                  <ul className="mt-1 space-y-1">
+                    {(settings.activityIgnoredFolders ?? [])
+                      .filter((f) => !unignored.includes(f))
+                      .map((f) => (
+                        <li key={f} className="flex flex-wrap items-center gap-x-3 text-[length:var(--fs-small)] text-[var(--text-main)]">
+                          <span className="min-w-0 truncate font-mono" title={f}>{f}</span>
+                          <button type="button" onClick={() => setUnignored((u) => [...u, f])} className="underline underline-offset-2 text-[var(--accent-text)] cursor-pointer">
+                            Stop skipping
+                          </button>
+                        </li>
+                      ))}
+                  </ul>
+                  <p className={HINT}>Press Save settings to apply.</p>
+                </div>
+              )}
             </div>
           </Section>
 

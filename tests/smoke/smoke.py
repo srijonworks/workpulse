@@ -1186,6 +1186,33 @@ def auto_day_close_adds_logs(s):
     s.no_errors()
 
 
+@check("settings_automatic_day")
+def settings_automatic_day(s):
+    """Settings -> Automatic day: the switches and the projects folder are saved, and a skipped folder can be let go."""
+    p = s.page
+    settings = s.ls("workpulse_settings")
+    settings["activityIgnoredFolders"] = ["E:\skipped\app"]
+    s.set_ls("workpulse_settings", settings)
+    s.reload()
+    s.settings_section("Automatic day")
+    day = p.get_by_role("checkbox", name=re.compile("Start and close the day automatically"))
+    projects = p.get_by_role("checkbox", name=re.compile("Create projects from my folders"))
+    expect(day).not_to_be_checked()  # the smoke profile starts with it off
+    expect(projects).to_be_checked()
+    day.check()
+    projects.uncheck()
+    p.locator("#watch-folder").fill("E:\Work")
+    p.get_by_role("button", name=re.compile("Stop skipping")).click()
+    btn(p, SEL["settings_save"]).click()
+    p.wait_for_timeout(400)
+    saved = s.ls("workpulse_settings")
+    assert saved.get("autoDayEnabled") is None, f"automatic day should be on again (stored as absent): {saved.get('autoDayEnabled')}"
+    assert saved.get("activityAutoProjects") is False, "auto projects should be off"
+    assert saved.get("activityWatchFolder") == "E:\Work", saved.get("activityWatchFolder")
+    assert not saved.get("activityIgnoredFolders"), "the skipped folder should be let go"
+    s.no_errors()
+
+
 @check("error_boundary_isolates_screen")
 def error_boundary_isolates_screen(s):
     """A screen that breaks shows a plain message and a way forward, the other screens keep working, and the data is
