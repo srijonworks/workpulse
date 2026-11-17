@@ -357,7 +357,7 @@ function setWidgetFromTray(kind, on) {
 // ---- Desktop widgets ----
 // Two small frameless windows (time, tasks) that show the same page in widget mode (`?widget=`). The main window
 // owns the data: it sends snapshots here, we pass them on, and button presses go back the same way.
-const WIDGET_SIZE = { time: { width: 232, height: 148 }, tasks: { width: 300, height: 340 } };
+const WIDGET_SIZE = { time: { width: 232, height: 188 }, tasks: { width: 300, height: 340 } };
 const widgetWins = { time: null, tasks: null };
 let widgetConfig = { time: { on: false, top: true }, tasks: { on: false, top: true } };
 let lastSnapshot = null;

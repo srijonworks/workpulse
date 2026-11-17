@@ -40,7 +40,7 @@ export const TimeWidget: React.FC<{ snap: WidgetSnapshot | null }> = ({ snap }) 
     : null;
 
   return (
-    <div className="wg relative flex h-screen flex-col justify-center gap-1 overflow-hidden rounded-[var(--radius-card)] border border-[var(--band-line)] bg-[var(--band-bg)] px-4 text-[var(--band-ink)]">
+    <div className="wg relative flex h-screen flex-col justify-center gap-1.5 overflow-hidden rounded-[var(--radius-card)] border border-[var(--band-line)] bg-[var(--band-bg)] px-4 py-4 text-[var(--band-ink)]">
       <div className="flex items-baseline justify-between gap-3 pr-6 text-[length:var(--fs-small)] text-[var(--band-muted)]">
         <span className="font-semibold uppercase tracking-[0.08em]">{label}</span>
         <span className="num">{formatClock(now)}</span>
