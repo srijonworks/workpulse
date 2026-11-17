@@ -27,6 +27,44 @@ const base = {
 };
 const items = [item('git:1', '2026-11-09T04:00:00.000Z'), item('git:2', '2026-11-09T04:10:00.000Z')];
 
+describe('loadSuggestions with quality filtering', () => {
+  const longItems = [item('git:1', '2026-11-09T04:00:00.000Z', { text: 'Add export button' }), item('git:2', '2026-11-09T04:20:00.000Z', { text: 'Wire export to History' })];
+  const noop = vi.fn();
+
+  it('without it, every suggestion comes back as before', async () => {
+    const r = await loadSuggestions({ ...base, ai: 'none' }, { scan: vi.fn().mockResolvedValue(scanOf(items)), suggest: noop });
+    expect(r.suggestions).toHaveLength(1);
+    expect(r.maybe).toBeUndefined();
+  });
+
+  it('keeps work of 15 minutes or more as a log', async () => {
+    const r = await loadSuggestions({ ...base, ai: 'none', quality: {} }, { scan: vi.fn().mockResolvedValue(scanOf(longItems)), suggest: noop });
+    expect(r.suggestions).toHaveLength(1);
+    expect(r.maybe).toEqual([]);
+  });
+
+  it('puts small work in "maybe" and counts trivial items as skipped, and never sends them to the AI', async () => {
+    const small = [item('git:1', '2026-11-09T04:00:00.000Z', { text: 'fix null check' }), item('git:9', '2026-11-09T04:01:00.000Z', { text: 'Merge branch main' })];
+    const suggest = vi.fn();
+    const r = await loadSuggestions({ ...base, ai: 'none', quality: { smallestLogMinutes: 15 } }, { scan: vi.fn().mockResolvedValue(scanOf(small)), suggest });
+    expect(r.suggestions).toHaveLength(0);
+    expect(r.maybe).toHaveLength(1);
+    expect(r.skipped).toBeGreaterThanOrEqual(1);
+    expect(r.maybe![0].itemIds).toEqual(['git:1']);
+  });
+
+  it('a lower smallest log turns the same work into a log', async () => {
+    const small = [item('git:1', '2026-11-09T04:00:00.000Z', { text: 'fix null check' })];
+    const r = await loadSuggestions({ ...base, ai: 'none', quality: { smallestLogMinutes: 1 } }, { scan: vi.fn().mockResolvedValue(scanOf(small)), suggest: noop });
+    expect(r.suggestions).toHaveLength(1);
+  });
+
+  it('a boost for a project raises the bar for it', async () => {
+    const r = await loadSuggestions({ ...base, ai: 'none', quality: { smallestLogMinutes: 15, boostFor: () => 2 } }, { scan: vi.fn().mockResolvedValue(scanOf(longItems)), suggest: noop });
+    expect(r.suggestions.length + (r.maybe?.length ?? 0)).toBe(1);
+  });
+});
+
 describe('loadSuggestions', () => {
   it('scans, groups with the AI and builds suggestions', async () => {
     const scan = vi.fn().mockResolvedValue(scanOf(items));

@@ -4,6 +4,9 @@ import { loadSuggestions, noticeSignature } from '../utils/activity/pipeline';
 import { aiFromSettings, sourcesFromSettings } from '../utils/activity/settings';
 import { suggestionToLogData } from '../utils/activity/suggestions';
 import { localDateOfIso, localTimeStr } from '../utils/dates';
+import { qualityFromSettings } from '../utils/activity/quality';
+import { recordSkipped } from '../utils/activity/skipCount';
+import { recordAiResult } from '../utils/aiResults';
 import { dueDays, readJournal, retryDelayMs, writeJournal } from '../utils/jobs/journal';
 import { isDoneUnlogged } from '../utils/taskLogging';
 
@@ -63,7 +66,10 @@ export function useDayClose(args: {
           geminiApiKey: settings.geminiApiKey ?? '',
           ai: aiFromSettings(settings),
           tasks: a.backlog.filter((t) => isDoneUnlogged(t) && t.completedAt && localDateOfIso(t.completedAt) === date),
+          quality: qualityFromSettings(settings),
         });
+        recordSkipped(localStorage, date, res.skipped ?? 0);
+        if (aiFromSettings(settings) !== 'none') recordAiResult(localStorage, res.notice ? 'template' : aiFromSettings(settings) === 'gemini' ? 'gemini' : 'claude', res.notice);
         if (cancelled) return;
         // A Resume during the scan reopens the day: leave it for the next clock-out.
         const stillClosed = latest.current.workdays[date]?.clockOut;

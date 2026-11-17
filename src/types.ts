@@ -119,6 +119,14 @@ export interface AppSettings {
   activityUseCodex?: boolean;
   // Document files worked on (names and times only): on unless set to false.
   activityUseDocs?: boolean;
+  // Files you changed (names and times only): on unless set to false.
+  activityUseFiles?: boolean;
+  // How small a piece of work may be and still get its own automatic log, in minutes. Absent = 15.
+  activitySmallestLog?: number;
+  // How much detail the automatic logs go into: 'brief' asks for twice the time, 'detailed' for half. Absent = normal.
+  activityDetail?: 'brief' | 'normal' | 'detailed';
+  // Logs are added by themselves while you work (with an Undo). Absent = on; false = suggestions wait for a tick.
+  activityAutoAdd?: boolean;
   // Projects are created from the folders you work in. Absent = on.
   activityAutoProjects?: boolean;
   // The start-of-day popup and the automatic clock-out safety net. Absent = on; false = off.

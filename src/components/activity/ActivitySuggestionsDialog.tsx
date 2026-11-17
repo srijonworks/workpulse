@@ -6,7 +6,8 @@ import { ModalShell } from '../ui/ModalShell';
 import { IconButton } from '../ui/IconButton';
 import { localDateStr } from '../../utils/dates';
 import { anyPromptSourceOn, byDisplayRank } from '../../utils/activity/registry';
-import { describeSources, loadSuggestions, noticeSignature } from '../../utils/activity/pipeline';
+import { ACTIVITY_SOURCES, type ActivitySource } from '../../utils/activity/registry';
+import { describeSources, loadSuggestions, noticeSignature, type PipelineArgs } from '../../utils/activity/pipeline';
 import { ActivitySessionRow, getActivitySession, rowTouched, setActivitySession, subscribeActivitySession } from '../../utils/activity/sessionStore';
 import { suggestionToLogData, taskIdsOf, trackedMinutesFor } from '../../utils/activity/suggestions';
 import { formatEstimate, formatMinutes } from '../../utils/activity/time';
@@ -43,6 +44,8 @@ export interface ActivitySuggestionsPanelProps {
   titleId?: string;
   /** Extra controls at the end of the heading row (full mode), e.g. a close button. */
   headerEnd?: React.ReactNode;
+  /** Which work is worth a log (see utils/activity/significance): small work waits in a "Maybe" list. */
+  quality?: PipelineArgs['quality'];
 }
 
 interface ActivitySuggestionsDialogProps extends Omit<ActivitySuggestionsPanelProps, 'onPendingChange' | 'onScanned' | 'compact' | 'date' | 'titleId' | 'headerEnd'> {
@@ -127,6 +130,7 @@ export const ActivitySuggestionsPanel: React.FC<ActivitySuggestionsPanelProps> =
   date: dateProp,
   titleId,
   headerEnd,
+  quality,
 }) => {
   const fallbackId = useId();
   const [pickedDate, setPickedDate] = useState(() => dateProp ?? localDateStr());
@@ -144,13 +148,13 @@ export const ActivitySuggestionsPanel: React.FC<ActivitySuggestionsPanelProps> =
 
   const signature = noticeSignature(sources, ai);
   const tasksKey = (doneTasks ?? []).map((t) => t.id).sort().join('|');
-  const hasSetup = (folders.length > 0 && (sources.claude || sources.git)) || (doneTasks?.length ?? 0) > 0;
+  const hasSetup = (folders.length > 0 && ACTIVITY_SOURCES.some((d) => sources[d.id as ActivitySource])) || (doneTasks?.length ?? 0) > 0;
   const activeProjects = projects.filter((p) => !p.isArchived);
 
   // The scan reads the latest logs and tasks without re-running whenever they change
   // (adding logs from this panel changes them).
-  const latest = useRef({ logs, backlog, projects, folders, sources, geminiApiKey, ai, doneTasks, tasksKey });
-  latest.current = { logs, backlog, projects, folders, sources, geminiApiKey, ai, doneTasks, tasksKey };
+  const latest = useRef({ logs, backlog, projects, folders, sources, geminiApiKey, ai, doneTasks, tasksKey, quality });
+  latest.current = { logs, backlog, projects, folders, sources, geminiApiKey, ai, doneTasks, tasksKey, quality };
   const callbacks = useRef({ onPendingChange, onScanned });
   callbacks.current = { onPendingChange, onScanned };
 
@@ -189,6 +193,7 @@ export const ActivitySuggestionsPanel: React.FC<ActivitySuggestionsPanelProps> =
         date: forDate, folders: l.folders, sources: l.sources, projects: l.projects, logs: l.logs, backlog: l.backlog,
         geminiApiKey: l.geminiApiKey, ai: l.ai, tasks: l.doneTasks,
         sameAs: background ? cur?.result.itemsKey : undefined,
+        quality: l.quality,
       });
       if (seq !== scanSeq.current) return;
       // A check the user asked for keeps its "Reading your activity..." in view for a moment, so a fast scan still shows it ran.
@@ -566,6 +571,32 @@ export const ActivitySuggestionsPanel: React.FC<ActivitySuggestionsPanelProps> =
             })}
           </ul>
         </>
+      )}
+      {compact && (session?.result.maybe?.length ?? 0) > 0 && (
+        <div className="mt-3 border-t border-[var(--border-app)] pt-3">
+          <p className="text-[length:var(--fs-small)] font-semibold text-[var(--text-main)]">Maybe</p>
+          <p className="text-[length:var(--fs-small)] text-[var(--text-muted)]">Small pieces of work. They are not added by themselves; more work on the same project turns them into a log.</p>
+          <ul className="mt-1">
+            {(session?.result.maybe ?? []).map((m) => (
+              <li key={m.key} className="flex items-center gap-3 py-1.5">
+                <span className="min-w-0 flex-1 truncate text-[length:var(--fs-small)] text-[var(--text-main)]" title={m.text}>
+                  {m.projectName} · {m.evidence} · {formatEstimate(m.minutes)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onAddLogs([suggestionToLogData(m, date, m.minutes, m.text, m.projectId, m.projectName, m.subtasks)]);
+                    const cur = getActivitySession(date);
+                    if (cur) setActivitySession(date, { ...cur, result: { ...cur.result, maybe: (cur.result.maybe ?? []).filter((x) => x.key !== m.key) } });
+                  }}
+                  className="shrink-0 min-h-8 pointer-coarse:min-h-11 px-2 text-[length:var(--fs-small)] font-semibold text-[var(--accent-text)] hover:underline underline-offset-4 cursor-pointer"
+                >
+                  Add
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </>
   );

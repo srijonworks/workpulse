@@ -20,6 +20,7 @@ import type { SheetBackupControls } from './v2/settings/SheetBackupBlock';
 import type { PhoneSyncStatus } from '../hooks/usePhoneSync';
 import { IconButton } from './ui/IconButton';
 import { normalizeTheme, type ThemeId } from '../utils/theme';
+import { validSmallestLog } from '../utils/activity/quality';
 import { activityFieldsFromSources, aiField, aiFromSettings, autoScanFromSettings, sourcesFromSettings } from '../utils/activity/settings';
 import type { ActivityAi, ActivitySources } from '../utils/activity/types';
 import { backupStatus, describeBackupAge } from '../utils/backupReminder';
@@ -198,6 +199,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [autoProjectsOn, setAutoProjectsOn] = useState(settings.activityAutoProjects !== false);
   const [watchFolder, setWatchFolder] = useState(settings.activityWatchFolder ?? '');
   const [unignored, setUnignored] = useState<string[]>([]);
+  // Which work becomes a log, and whether logs are added by themselves while you work.
+  const [autoAddOn, setAutoAddOn] = useState(settings.activityAutoAdd !== false);
+  const [smallestLog, setSmallestLog] = useState(String(settings.activitySmallestLog ?? 15));
+  const [detail, setDetail] = useState<'brief' | 'normal' | 'detailed'>(settings.activityDetail ?? 'normal');
   const [activityAi, setActivityAi] = useState<ActivityAi>(aiFromSettings(settings));
 
   const goTo = (id: SectionId) => {
@@ -245,6 +250,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       activityAi: aiField(activityAi),
       activityAutoScan: activityAutoScan ? undefined : false,
       autoDayEnabled: autoDayOn ? undefined : false,
+      activityAutoAdd: autoAddOn ? undefined : false,
+      activitySmallestLog: validSmallestLog(Number(smallestLog)) === 15 ? undefined : validSmallestLog(Number(smallestLog)),
+      activityDetail: detail === 'normal' ? undefined : detail,
       activityAutoProjects: autoProjectsOn ? undefined : false,
       activityWatchFolder: watchFolder.trim() || undefined,
       // read from the live settings, so a folder ignored since this page opened (a project deleted for good) is kept
@@ -748,6 +756,50 @@ Your current Gemini API key is kept. Export a backup first if you want to keep y
               autoScan={activityAutoScan}
               onAutoScanChange={setActivityAutoScan}
             />
+            <div className="mt-6 space-y-5">
+              <label className="flex items-start gap-2.5 text-[length:var(--fs-small)] text-[var(--text-main)] cursor-pointer">
+                <input type="checkbox" checked={autoAddOn} onChange={(e) => setAutoAddOn(e.target.checked)} className="mt-0.5" />
+                <span>
+                  <span className="font-semibold">Add logs automatically while I work</span>
+                  <span className="block text-[var(--text-muted)]">
+                    Every 10 minutes WorkPulse adds a log for work worth mentioning. Each one says Auto and has an Undo. Small work waits in a Maybe list on Today.
+                    Turn this off to tick and add suggestions yourself.
+                  </span>
+                </span>
+              </label>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor={`${uid}-smallest`} className={LABEL}>
+                    Smallest log (minutes)
+                  </label>
+                  <input
+                    id={`${uid}-smallest`}
+                    type="number"
+                    min={1}
+                    max={240}
+                    value={smallestLog}
+                    onChange={(e) => setSmallestLog(e.target.value)}
+                    className={`${FIELD} num`}
+                  />
+                  <p className={HINT}>Work shorter than this is not logged by itself. 15 is a good start.</p>
+                </div>
+                <div>
+                  <label htmlFor={`${uid}-detail`} className={LABEL}>
+                    Detail of automatic logs
+                  </label>
+                  <Select
+                    id={`${uid}-detail`}
+                    value={detail}
+                    onChange={(v) => setDetail(v as 'brief' | 'normal' | 'detailed')}
+                    options={[
+                      { value: 'brief', label: 'Brief (only bigger pieces of work)' },
+                      { value: 'normal', label: 'Normal' },
+                      { value: 'detailed', label: 'Detailed (smaller pieces too)' },
+                    ]}
+                  />
+                </div>
+              </div>
+            </div>
           </Section>
 
           <Section

@@ -101,6 +101,13 @@ import { AdjustTimeDialog } from './components/v2/AdjustTimeDialog';
 import { useDayClose } from './hooks/useDayClose';
 import { useStandups } from './hooks/useStandups';
 import { useDelivery } from './hooks/useDelivery';
+import { needsRewrite } from './utils/standupRewrite';
+import { skippedOn } from './utils/activity/skipCount';
+import { describeAiWriter } from './utils/aiStatus';
+import { loadAiResults, recordAiResult } from './utils/aiResults';
+import { useLiveActivity } from './hooks/useLiveActivity';
+import { qualityFromSettings } from './utils/activity/quality';
+import { loadLearnHistory, recordDeletion, saveLearnHistory } from './utils/activity/learn';
 import { readJournal } from './utils/jobs/journal';
 import { parseRepairs } from './utils/systemStatus';
 import { health } from './utils/health/registry';
@@ -693,6 +700,14 @@ export default function App() {
     const index = logs.findIndex((l) => l.id === id);
     if (index === -1) return;
     const removed = logs[index];
+    // Deleting a log that was added automatically teaches the filter: small work like it needs more next time.
+    if (removed.origin === 'auto') {
+      try {
+        saveLearnHistory(localStorage, recordDeletion(loadLearnHistory(localStorage), removed));
+      } catch {
+        // learning is a bonus
+      }
+    }
     const updated = logs.filter((l) => l.id !== id);
     setLogs(updated);
     saveLogs(updated);
@@ -1483,6 +1498,8 @@ export default function App() {
   });
   // "Alive now" every 30 s: after a shutdown it says when the PC was last in use (the automatic day uses it later).
   const lastAlive = useHeartbeat(dataLoaded);
+  // While a workday is open, worthwhile work is logged by itself every 10 minutes (see hooks/useLiveActivity).
+  useLiveActivity({ enabled: dataLoaded && settings.autoDayEnabled !== false, workdays, logs, backlog, projects, settings, addAutoLogs: handleAddAutoLogs });
   useDayClose({
     enabled: dataLoaded && settings.autoDayEnabled !== false,
     workdays,
@@ -1494,7 +1511,7 @@ export default function App() {
   });
   // Saved standups: written once for each closed day (after the day-close job, or 30 minutes after the clock-out), and on a
   // Thursday also for the week Friday to Thursday. Saved whenever they change.
-  const { ensureStandup, ensureWeekStandup } = useStandups({ enabled: dataLoaded && settings.autoDayEnabled !== false, logs, backlog, settings, workdays, standups, setStandups });
+  const { ensureStandup, ensureWeekStandup, rewrite } = useStandups({ enabled: dataLoaded && settings.autoDayEnabled !== false, logs, backlog, settings, workdays, standups, setStandups });
   useEffect(() => {
     if (!dataLoaded) return;
     saveStandups(standups);
@@ -1715,6 +1732,10 @@ export default function App() {
   const stableSources = useMemo(() => activitySources, [sourcesKey]);
   const ai = aiFromSettings(settings);
   const autoScan = autoScanFromSettings(settings);
+  const quality = useMemo(
+    () => qualityFromSettings({ activitySmallestLog: settings.activitySmallestLog, activityDetail: settings.activityDetail }),
+    [settings.activitySmallestLog, settings.activityDetail],
+  );
   const activityProps: TodayActivityProps = useMemo(
     () => ({
       folders,
@@ -1724,9 +1745,10 @@ export default function App() {
       geminiApiKey: settings.geminiApiKey,
       onAddLogs: h.addLogs,
       onOpenSettings: h.openSettings,
+      quality,
     }),
     // h.* never change identity, so they are not dependencies.
-    [folders, stableSources, ai, autoScan, settings.geminiApiKey],
+    [folders, stableSources, ai, autoScan, settings.geminiApiKey, quality],
   );
 
   const hasSheet = Boolean(settings.googleScriptUrl);
@@ -1861,6 +1883,8 @@ export default function App() {
             selectedDay={historyDay}
             onSelectDay={setHistoryDay}
             standupFor={(date) => standups.find((s) => s.id === `day:${date}`)?.text}
+            canRewriteStandup={(date) => { const s = standups.find((x) => x.id === `day:${date}`); return !!s && needsRewrite(s); }}
+            onRewriteStandup={rewrite}
             hours={hours}
             onEditLog={h.editLog}
             onDeleteLog={h.deleteLog}
@@ -1892,6 +1916,8 @@ export default function App() {
               sheetConfigured: !!settings.googleScriptUrl,
               phoneConfigured: !!settings.phoneToken,
               autoDayEnabled: settings.autoDayEnabled !== false,
+              skippedToday: skippedOn(localStorage, localDateStr()),
+              aiWriter: describeAiWriter({ ai: settings.activityAi, geminiKey: settings.geminiApiKey, lastResults: loadAiResults(localStorage) }),
               desktop: !!desktopBridge(),
             }}
             onSystemAction={(a) => {

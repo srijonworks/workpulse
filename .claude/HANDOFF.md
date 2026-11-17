@@ -4,6 +4,8 @@
 - Stages 0 to 6 built (see the plan file). Latest round: standups (`utils/standup.ts`, `hooks/useStandups.ts`, key `workpulse_standups`, in backups), Apps Script v6 (locks, `saveHistory`/`sendDayEmail`/`emailStatus`/`cancelDayEmail`, `phoneAddLog`, Origin column), delivery (`hooks/useDelivery.ts`, `utils/jobs/delivery.ts`: day history to the Sheet + standup email 30 min later, needs `emailEnabled` and v6), History day panel + date jump + export, widgets (clock-in, end day, quick add, Not updating marker, tray checkboxes), System status screen, docs (`CLAUDE.md`, `docs/system-status.md`), sync stamp = request start.
 - Verified: lint clean, 1027 unit tests, smoke 51/51 (history check updated to the new day panel).
 
+- Latest: activity quality (noise filter, 15-min smallest log, Maybe list, live auto-add every 10 min with Undo, learning from deletions), reader registry + files source, AI-writer status row, Rewrite with AI. Unit 1136, smoke 57/57. Not yet released: run `npm run desktop:build`.
+
 ## Pending (not done, not tested)
 - NOT TESTED for real: the v6 script on Google (re-paste + New version needed), a real standup email, the packaged installer (`desktop:pack`), widgets and tray in a running Electron, renderer crash recovery, flush on quit.
 - Stage 2 leftovers: server as a restartable utility process, crash-loop safe mode, hung-instance takeover.

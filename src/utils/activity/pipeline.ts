@@ -1,4 +1,5 @@
 import { scanActivityApi, suggestTasksApi } from './client';
+import { isNoise, scoreCluster, type DetailLevel } from './significance';
 import { ACTIVITY_SOURCES, byDisplayRank, type SourceDescriptor } from './registry';
 import { buildSuggestions, consumedIds, dropConsumed, projectFolderKey, taskItems, templateTasks } from './suggestions';
 import type { BacklogTask, Project, WorkLog } from '../../types';
@@ -29,6 +30,11 @@ export interface PipelineArgs {
   tasks?: BacklogTask[];
   /** The `itemsKey` of the last result: when nothing changed since, the AI is not asked again. */
   sameAs?: string;
+  /**
+   * Which work is worth a log. Without it every suggestion is returned as before. With it, trivial items are dropped, and
+   * each suggestion is a log, a "maybe" (too small for its own log for now) or skipped.
+   */
+  quality?: { smallestLogMinutes?: number; detail?: DetailLevel; boostFor?: (projectId: string) => number };
 }
 
 export interface PipelineResult {
@@ -40,6 +46,10 @@ export interface PipelineResult {
   unchanged?: boolean;
   /** Set when the AI was not used: why, in a plain sentence. */
   notice?: string;
+  /** Work close to the line: too small for a log now. A later scan may find more of it, and then it becomes a log. */
+  maybe?: Suggestion[];
+  /** How many small or trivial pieces of work were left out (the System status screen shows the day's count). */
+  skipped?: number;
 }
 
 interface Deps {
@@ -62,7 +72,10 @@ export async function loadSuggestions(args: PipelineArgs, deps: Deps = REAL): Pr
   };
   const scanned = canScan ? await deps.scan({ date: args.date, folders: args.folders, sources: args.sources }) : empty;
   const tasks = (args.tasks ?? []).filter((t) => args.projects.some((p) => p.id === t.projectId));
-  const items = dropConsumed([...scanned.items, ...taskItems(tasks, args.folders)], consumedIds(args.logs));
+  const all = dropConsumed([...scanned.items, ...taskItems(tasks, args.folders)], consumedIds(args.logs));
+  // Trivial items (a merge commit, "yes", "wip") never reach the AI; done tasks always count.
+  const items = args.quality ? all.filter((i) => i.source === 'task' || !isNoise(i)) : all;
+  const noise = all.length - items.length;
   const itemsKey = items.map((i) => i.id).sort().join('|');
   if (items.length === 0) return { suggestions: [], status: scanned.status, itemsKey };
   if (args.sameAs !== undefined && args.sameAs === itemsKey) return { suggestions: [], status: scanned.status, itemsKey, unchanged: true };
@@ -99,7 +112,25 @@ export async function loadSuggestions(args: PipelineArgs, deps: Deps = REAL): Pr
     logs: args.logs,
     backlog: args.backlog,
   });
-  return { suggestions, status: scanned.status, itemsKey, notice: aiTasks ? undefined : notice };
+  if (!args.quality) return { suggestions, status: scanned.status, itemsKey, notice: aiTasks ? undefined : notice };
+
+  // Which suggestions are worth a log of their own.
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const logsOut: Suggestion[] = [];
+  const maybe: Suggestion[] = [];
+  let skipped = noise;
+  for (const s of suggestions) {
+    const cluster = { items: s.itemIds.map((id) => byId.get(id)).filter((i): i is ActivityItem => !!i), minutes: s.minutes };
+    const level = scoreCluster(cluster, {
+      smallestLogMinutes: args.quality.smallestLogMinutes,
+      detail: args.quality.detail,
+      boost: args.quality.boostFor?.(s.projectId),
+    }).level;
+    if (level === 'log') logsOut.push(s);
+    else if (level === 'maybe') maybe.push(s);
+    else skipped++;
+  }
+  return { suggestions: logsOut, maybe, skipped, status: scanned.status, itemsKey, notice: aiTasks ? undefined : notice };
 }
 
 /** One plain line per switched-on source: how much was found, and any note about it. */

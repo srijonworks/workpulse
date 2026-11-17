@@ -123,6 +123,24 @@ const SOURCES = [
     aiKind: 'document',
     displayRank: 4,
   },
+  {
+    id: 'files',
+    label: 'Files you changed',
+    settingKey: 'activityUseFiles',
+    kind: 'files',
+    short: 'Files',
+    noticeLine: (ai: string) => `The names of files you changed in your project folders go to ${ai} too (never their contents).`,
+    settingsText: {
+      title: 'Include files you changed',
+      description:
+        'Which files you changed today in these folders, by name and time only. It shows your work on a day with no commit or AI tool. Files are never opened.',
+    },
+    evidence: (n: number) => plural(n, 'edit batch', 'edit batches'),
+    countSessions: false,
+    promptLike: false,
+    aiKind: 'files',
+    displayRank: 5,
+  },
 ] as const satisfies readonly SourceDescriptor[];
 
 /** Scan and summary order. */

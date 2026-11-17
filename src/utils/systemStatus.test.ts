@@ -25,7 +25,7 @@ describe('buildSystemStatus', () => {
   it('is all ok when nothing is wrong', () => {
     const s = buildSystemStatus(input());
     expect(s.overall).toBe('ok');
-    expect(s.rows.map((r) => r.id)).toEqual(['saving', 'disk', 'sheet', 'phone', 'activity', 'autoDay', 'screens', 'desktop']);
+    expect(s.rows.map((r) => r.id)).toEqual(['saving', 'disk', 'sheet', 'phone', 'activity', 'ai', 'autoDay', 'screens', 'desktop']);
   });
   it('marks a blocked key bad with a backup action', () => {
     const r = row(buildSystemStatus(input({ engine: engine({ blockedKeys: ['workpulse_logs'] }) })), 'saving');
@@ -100,3 +100,16 @@ describe('dayCloseDays, parseRepairs, buildDiagnostics', () => {
     expect(text).toContain('Storage:');
   });
 });
+
+describe('AI writer and skipped work', () => {
+  it('says the AI writer fell back to plain wording, as a warning', () => {
+    const s = buildSystemStatus(input({ aiWriter: { state: 'fallback', sentence: 'The AI writer is not available, so WorkPulse is using plain wording. It tries again by itself.' } }));
+    expect(row(s, 'ai').state).toBe('warn');
+    expect(row(s, 'ai').sentence).toMatch(/plain wording/);
+  });
+  it('mentions the small work left out of the logs of today', () => {
+    const s = buildSystemStatus(input({ skippedToday: 3 }));
+    expect(row(s, 'activity').sentence).toMatch(/3 small pieces of work left out/);
+  });
+});
+

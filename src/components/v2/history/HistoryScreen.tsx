@@ -26,6 +26,10 @@ export interface HistoryScreenProps {
   onSelectDay(date: string): void;
   /** The saved standup text of a date, when there is one (shown in the day panel with Copy). */
   standupFor?(date: string): string | undefined;
+  /** True when the standup of this date was written with the plain template and can be written again with the AI. */
+  canRewriteStandup?(date: string): boolean;
+  /** Writes it again with the AI. Resolves true when an AI wrote it, false when the AI is still not available. */
+  onRewriteStandup?(date: string): Promise<boolean>;
   /** Workday length in hours (the week strip's target line). */
   hours: number;
   onEditLog(log: WorkLog): void;
@@ -81,6 +85,8 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
   selectedDay,
   onSelectDay,
   standupFor,
+  canRewriteStandup,
+  onRewriteStandup,
   hours,
   onEditLog,
   onDeleteLog,
@@ -173,6 +179,8 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
     [selectedDay, today, now, logs, workdays, backlog],
   );
   const standup = standupFor?.(selectedDay);
+  const [rewriting, setRewriting] = useState(false);
+  const [rewriteNote, setRewriteNote] = useState('');
 
   // A search that is a date ("2026-11-14", "yesterday", "today") jumps to that day instead.
   const onQuery = (value: string) => {
@@ -326,10 +334,33 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
           <div>
             <div className="flex items-center justify-between gap-3 pb-2">
               <h3 className="text-[length:var(--fs-small)] font-bold text-[var(--text-main)]">Standup</h3>
-              <button type="button" onClick={() => onCopy(standup)} className={TEXT_BTN}>
-                Copy standup
-              </button>
+              <div className="flex items-center gap-3">
+                {onRewriteStandup && canRewriteStandup?.(selectedDay) && (
+                  <button
+                    type="button"
+                    disabled={rewriting}
+                    onClick={async () => {
+                      setRewriting(true);
+                      setRewriteNote('');
+                      const ok = await onRewriteStandup(selectedDay);
+                      setRewriting(false);
+                      if (!ok) setRewriteNote('The AI writer is still not available. Try again later.');
+                    }}
+                    className={TEXT_BTN}
+                  >
+                    {rewriting ? 'Writing…' : 'Rewrite with AI'}
+                  </button>
+                )}
+                <button type="button" onClick={() => onCopy(standup)} className={TEXT_BTN}>
+                  Copy standup
+                </button>
+              </div>
             </div>
+            {rewriteNote && (
+              <p role="status" className="pb-2 text-[length:var(--fs-small)] text-[var(--text-muted)]">
+                {rewriteNote}
+              </p>
+            )}
             <p className="v2-panel v2-row v2-inset whitespace-pre-wrap text-[length:var(--fs-body)]">{standup}</p>
           </div>
         )}

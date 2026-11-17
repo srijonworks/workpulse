@@ -21,9 +21,9 @@ const fake: SourceDescriptor = {
 const withFake = [...ACTIVITY_SOURCES, fake];
 
 suite('registry', () => {
-  it('has the five known sources with their existing settings keys', () => {
-    expect(ACTIVITY_SOURCE_IDS).toEqual(['claude', 'git', 'opencode', 'codex', 'docs']);
-    expect(ACTIVITY_SOURCES.map((d) => d.settingKey)).toEqual(['activityUseClaude', 'activityUseGit', 'activityUseOpenCode', 'activityUseCodex', 'activityUseDocs']);
+  it('has the six known sources with their existing settings keys', () => {
+    expect(ACTIVITY_SOURCE_IDS).toEqual(['claude', 'git', 'opencode', 'codex', 'docs', 'files']);
+    expect(ACTIVITY_SOURCES.map((d) => d.settingKey)).toEqual(['activityUseClaude', 'activityUseGit', 'activityUseOpenCode', 'activityUseCodex', 'activityUseDocs', 'activityUseFiles']);
   });
   it('has a server reader for every id', () => {
     expect(Object.keys(READERS).sort()).toEqual([...ACTIVITY_SOURCE_IDS].sort());
@@ -31,7 +31,7 @@ suite('registry', () => {
   it('looks up, ranks and classifies', () => {
     expect(describe('git')?.label).toBe('Git commits');
     expect(describe('task')).toBeUndefined();
-    expect(byDisplayRank().map((d) => d.id)).toEqual(['git', 'claude', 'opencode', 'codex', 'docs']);
+    expect(byDisplayRank().map((d) => d.id)).toEqual(['git', 'claude', 'opencode', 'codex', 'docs', 'files']);
     expect(isPromptLike('codex')).toBe(true);
     expect(isPromptLike('git')).toBe(false);
     expect(anyPromptSourceOn({ git: true, docs: true })).toBe(false);

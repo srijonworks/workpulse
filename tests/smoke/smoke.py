@@ -110,6 +110,7 @@ THEMES = ["chase", "timecard", "console"]
 SCREENS = ["today", "tasks", "history", "settings"]
 SEED_SETTINGS = {
     "googleScriptUrl": "", "geminiApiKey": "", "defaultTone": "casual", "clockInMessageEnabled": False,
+    "activitySmallestLog": 1,  # the activity fixtures are small: every piece of work counts as a log, unless a check sets it higher
     "autoDayEnabled": False,  # the start-of-day popup and automatic clock-out are switched on only in their own checks
 }
 IGNORED_CONSOLE = (
@@ -1353,6 +1354,49 @@ def projects_add_all_in_folder(s):
     s.no_errors()
 
 
+@check("live_activity_auto_add")
+def live_activity_auto_add(s):
+    """While a workday is open, work worth a log is added by itself (marked Auto, with an Undo) and the card on Today does
+    not offer it again; a log written by hand is left alone."""
+    p = s.page
+    calls = _stub_activity(s)  # two commits in a folder linked to proj-1
+    settings = s.ls("workpulse_settings")
+    settings["activitySmallestLog"] = 5
+    s.set_ls("workpulse_settings", settings)
+    p.evaluate("([k, v]) => localStorage.setItem(k, v)", [ACK_KEY, ACK_VALUE])
+    manual = {"id": "log-1731000000000-hand", "date": "2026-11-16", "time": "08:00", "projectId": "proj-1", "projectName": "Core Platform & API",
+              "description": "Smoke: written by hand", "status": "completed", "tags": [], "durationMinutes": 30, "createdAt": "2026-11-16T02:00:00.000Z"}
+    p.evaluate("(m) => localStorage.setItem('workpulse_logs', JSON.stringify([m]))", manual)
+    _auto_day_on(s, {"2026-11-16": {"clockIn": "2026-11-16T02:30:00.000Z"}})
+    expect(p.get_by_text("added automatically")).to_be_visible(timeout=45000)
+    logs = s.ls("workpulse_logs")
+    auto = [l for l in logs if l.get("origin") == "auto"]
+    assert auto and all(l["date"] == "2026-11-16" for l in auto), f"expected auto logs for today, got {logs}"
+    assert any(l["id"] == manual["id"] for l in logs), "the log written by hand must stay"
+    p.wait_for_timeout(1500)
+    assert s.ls("workpulse_logs") and len([l for l in s.ls("workpulse_logs") if l.get("origin") == "auto"]) == len(auto), "the same work was added twice"
+    s.no_errors()
+
+
+@check("maybe_list_for_small_work")
+def maybe_list_for_small_work(s):
+    """Work smaller than the smallest log is not added by itself: it waits in a Maybe list on Today, and Add makes it a log."""
+    p = s.page
+    _stub_activity(s)
+    settings = s.ls("workpulse_settings")
+    settings["activitySmallestLog"] = 15
+    s.set_ls("workpulse_settings", settings)
+    p.evaluate("([k, v]) => localStorage.setItem(k, v)", [ACK_KEY, ACK_VALUE])
+    s.reload()
+    card = p.get_by_role("region", name=re.compile(r"^Suggested from your activity"))
+    expect(card.get_by_text("Maybe", exact=True)).to_be_visible(timeout=15000)
+    before = len(s.ls("workpulse_logs") or [])
+    btn(card, "Add", exact=True).first.click()
+    p.wait_for_timeout(500)
+    assert len(s.ls("workpulse_logs") or []) > before, "Add on a Maybe item did not make a log"
+    s.no_errors()
+
+
 @check("error_boundary_isolates_screen")
 def error_boundary_isolates_screen(s):
     """A screen that breaks shows a plain message and a way forward, the other screens keep working, and the data is
@@ -1449,7 +1493,7 @@ def sync_button(s):
 
 
 ACK_KEY = "workpulse_activity_notice"
-ACK_VALUE = "git+claude+opencode+codex+docs|claude"  # the data notice for the default sources and AI writer
+ACK_VALUE = "git+claude+opencode+codex+docs+files|claude"  # the data notice for the default sources and AI writer
 
 
 def _open_end_day_with_done_task(s):

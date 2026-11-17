@@ -10,6 +10,7 @@ import { readGitChanges } from '../gitChanges';
 import { readCodexHistory } from '../readCodex';
 import { readOpenCodeHistory } from '../readOpenCode';
 import { readDocuments } from '../readDocuments';
+import { readFileActivity } from '../readFileActivity';
 import type { ActivityItem, ActivitySource, SourceStatus } from '../../utils/activity/types';
 
 const execFileAsync = promisify(execFile);
@@ -34,6 +35,7 @@ export const READERS: Record<ActivitySource, ServerReader> = {
   git: { failNote: "Couldn't read git history", read: readGit },
   opencode: { failNote: "Couldn't read OpenCode history", read: (c) => readOpenCodeHistory(c.paths, c.range, { dbPath: c.opts.openCodeDb }) },
   codex: { failNote: "Couldn't read Codex history", read: (c) => readCodexHistory(c.paths, c.range, { codexDir: c.opts.codexDir }) },
+  files: { failNote: "Couldn't look at the files you changed", read: (c) => readFileActivity(c.paths, c.range) },
   docs: { failNote: "Couldn't look through the folders for documents", read: (c) => readDocuments(c.paths, c.range) },
 };
 

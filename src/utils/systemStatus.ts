@@ -1,3 +1,4 @@
+import type { AiWriterStatus } from './aiStatus';
 import { localDateStr } from './dates';
 import type { EngineStatus } from './persist/engine';
 import { STORAGE_LIMIT_BYTES, storageNearlyFull } from './persist/engine';
@@ -13,7 +14,7 @@ export type StatusState = 'ok' | 'warn' | 'bad';
 export type StatusAction = 'retry' | 'open-settings' | 'download-backup';
 
 export interface StatusRow {
-  id: 'saving' | 'disk' | 'sheet' | 'phone' | 'activity' | 'autoDay' | 'screens' | 'desktop';
+  id: 'saving' | 'disk' | 'sheet' | 'phone' | 'activity' | 'ai' | 'autoDay' | 'screens' | 'desktop';
   label: string;
   state: StatusState;
   /** A fixed, plain sentence. */
@@ -41,6 +42,10 @@ export interface SystemStatusInput {
   sheetConfigured: boolean;
   phoneConfigured: boolean;
   autoDayEnabled: boolean;
+  /** Small or trivial pieces of work left out of the automatic logs today. */
+  skippedToday?: number;
+  /** Which writer (Claude, Gemini, plain template) wrote the latest logs and standups. */
+  aiWriter?: AiWriterStatus;
   /** Running inside the desktop app (the bridge is there). */
   desktop: boolean;
 }
@@ -171,7 +176,15 @@ function phoneRow(i: SystemStatusInput): StatusRow {
 function activityRow(i: SystemStatusInput): StatusRow {
   const e = byId(i.health, 'activity');
   const h = fromHealth([e], i.now, e?.lastOkAt ? 'The activity readers are working.' : 'No check yet.');
-  return { id: 'activity', label: 'Activity readers', ...h };
+  const n = i.skippedToday ?? 0;
+  const skipped = n > 0 ? ` ${n} small ${n === 1 ? 'piece' : 'pieces'} of work left out of today's logs; lower "Smallest log" in Settings to include more.` : '';
+  return { id: 'activity', label: 'Activity readers', ...h, sentence: `${h.sentence}${h.state === 'ok' ? skipped : ''}` };
+}
+
+function aiRow(i: SystemStatusInput): StatusRow {
+  const a = i.aiWriter;
+  if (!a) return { id: 'ai', label: 'AI writer', state: 'ok', sentence: 'No logs or standups written yet.' };
+  return { id: 'ai', label: 'AI writer', state: a.state === 'ok' ? 'ok' : 'warn', sentence: a.sentence };
 }
 
 function autoDayRow(i: SystemStatusInput): StatusRow {
@@ -208,7 +221,7 @@ export function dayCloseDays(journal: Journal, nowMs: number, n = 7): DayCloseDa
 }
 
 export function buildSystemStatus(i: SystemStatusInput): SystemStatus {
-  const rows = [savingRow(i), diskRow(i), sheetRow(i), phoneRow(i), activityRow(i), autoDayRow(i), screensRow(i), desktopRow(i)];
+  const rows = [savingRow(i), diskRow(i), sheetRow(i), phoneRow(i), activityRow(i), aiRow(i), autoDayRow(i), screensRow(i), desktopRow(i)];
   const bytes = Math.max(0, i.storageBytes);
   return {
     rows,

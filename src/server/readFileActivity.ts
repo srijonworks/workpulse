@@ -104,7 +104,7 @@ export async function readFileActivity(
     const hash = createHash('sha1').update(b.folder.toLowerCase()).digest('hex').slice(0, 10);
     items.push({
       id: `file:${date}:${hash}:${b.bucket}`,
-      source: 'files' as ActivityItem['source'],
+      source: 'files',
       folder: b.folder,
       time: new Date(b.latest).toISOString(),
       text: clip(redactSecrets(label), TEXT_MAX),
