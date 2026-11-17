@@ -117,6 +117,8 @@ export interface AppSettings {
   activityUseDocs?: boolean;
   // Projects are created from the folders you work in. Absent = on.
   activityAutoProjects?: boolean;
+  // The start-of-day popup and the automatic clock-out safety net. Absent = on; false = off.
+  autoDayEnabled?: boolean;
   // The folder that holds your projects. Absent: the common parent of the linked folders.
   activityWatchFolder?: string;
   // Folders the automatic projects skip (a project deleted for good adds its folder here).

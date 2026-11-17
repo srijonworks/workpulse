@@ -110,6 +110,7 @@ THEMES = ["chase", "timecard", "console"]
 SCREENS = ["today", "tasks", "history", "settings"]
 SEED_SETTINGS = {
     "googleScriptUrl": "", "geminiApiKey": "", "defaultTone": "casual", "clockInMessageEnabled": False,
+    "autoDayEnabled": False,  # the start-of-day popup and automatic clock-out are switched on only in their own checks
 }
 IGNORED_CONSOLE = (
     re.compile(r"favicon", re.I),
@@ -1100,6 +1101,47 @@ def second_window_read_only(s):
     quick_log(s, "Smoke: first window still writes")
     assert len(s.ls("workpulse_logs")) == before + 1
     second.close()
+    s.no_errors()
+
+
+def _auto_day_on(s, workdays=None):
+    """Switches the automatic day on for this page, fixes the clock at Monday 2026-11-16 09:05 (Dhaka) and reloads."""
+    from datetime import datetime, timezone
+    s.ctx.clock.set_fixed_time(datetime(2026, 11, 16, 3, 5, tzinfo=timezone.utc))
+    s.page.evaluate(
+        "(wd) => { const s = JSON.parse(localStorage.getItem('workpulse_settings') || '{}'); s.autoDayEnabled = true;"
+        " localStorage.setItem('workpulse_settings', JSON.stringify(s));"
+        " localStorage.setItem('workpulse_workdays', JSON.stringify(wd)); }",
+        workdays or {},
+    )
+    s.reload()
+
+
+@check("auto_day_start_popup")
+def auto_day_start_popup(s):
+    """On a working day with no clock-in the start-of-day popup opens by itself, suggesting the time, and is not
+    shown again once it is closed."""
+    p = s.page
+    _auto_day_on(s)
+    dialog = p.get_by_role("dialog")
+    expect(dialog).to_contain_text("You started working around", timeout=9000)
+    expect(dialog).to_contain_text("confirms itself in 10 minutes")
+    p.keyboard.press("Escape")
+    expect(dialog).to_have_count(0, timeout=3000)
+    p.wait_for_timeout(500)
+    assert p.evaluate("() => localStorage.getItem('workpulse_autoday_dismissed')") == "2026-11-16"
+    s.no_errors()
+
+
+@check("auto_day_closes_forgotten_day")
+def auto_day_closes_forgotten_day(s):
+    """A day that was never clocked out is closed by itself, at a time that is not later than 23:59 of that day, and
+    the person is told."""
+    p = s.page
+    _auto_day_on(s, {"2026-11-15": {"clockIn": "2026-11-15T03:00:00.000Z"}})
+    expect(p.get_by_text("was closed automatically at")).to_be_visible(timeout=9000)
+    rec = s.ls("workpulse_workdays")["2026-11-15"]
+    assert rec.get("clockOut"), f"the forgotten day was not closed: {rec}"
     s.no_errors()
 
 

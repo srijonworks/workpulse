@@ -1,29 +1,48 @@
-import React, { useId, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { ModalShell } from '../ui/ModalShell';
 import { localTimeStr } from '../../utils/dates';
 import { chosenClockIn } from '../../utils/workday';
+import { AUTO_CONFIRM_MS, shouldAutoConfirm } from '../../utils/autoDay/startPrompt';
 
 interface ClockInDialogProps {
   isOpen: boolean;
   onClose(): void;
   /** ISO timestamp of the clock-in: now, or the chosen time (yesterday when it has not come yet today). */
-  onConfirm(atIso: string): void;
+  onConfirm(atIso: string, auto?: boolean): void;
+  /** Set when the popup opened by itself: the time it suggests (ISO). The time field starts there. */
+  suggestedAt?: string;
+  /** The last time someone used the PC (ms). With `suggestedAt`, the popup confirms itself after 10 minutes if this moved. */
+  getLastActivityMs?: () => number | null;
 }
 
-export const ClockInDialog: React.FC<ClockInDialogProps> = ({ isOpen, onClose, onConfirm }) =>
-  isOpen ? <ClockInPanel onClose={onClose} onConfirm={onConfirm} /> : null;
+export const ClockInDialog: React.FC<ClockInDialogProps> = ({ isOpen, ...rest }) => (isOpen ? <ClockInPanel {...rest} /> : null);
 
 // Mounted fresh on every open, so the time field starts at the current time.
-const ClockInPanel: React.FC<Omit<ClockInDialogProps, 'isOpen'>> = ({ onClose, onConfirm }) => {
+const ClockInPanel: React.FC<Omit<ClockInDialogProps, 'isOpen'>> = ({ onClose, onConfirm, suggestedAt, getLastActivityMs }) => {
   const id = useId();
   const titleId = `${id}-title`;
   const timeId = `${id}-time`;
   const errorId = `${id}-error`;
-  const [time, setTime] = useState(() => localTimeStr());
+  const [time, setTime] = useState(() => (suggestedAt ? localTimeStr(new Date(suggestedAt)) : localTimeStr()));
   const [error, setError] = useState('');
 
   // A time later than now means yesterday (clocking in after midnight for a late start).
   const chosen = chosenClockIn(time, Date.now());
+
+  // Opened by itself: after 10 minutes it clocks in with the time in the field, but only if someone used the PC since it
+  // appeared (so a PC left alone does not clock in). The time can be edited until then.
+  const shownAt = useRef(Date.now());
+  const timeRef = useRef(time);
+  timeRef.current = time;
+  useEffect(() => {
+    if (!suggestedAt) return;
+    const id = setInterval(() => {
+      if (!shouldAutoConfirm({ shownAtMs: shownAt.current, nowMs: Date.now(), lastActivityMs: getLastActivityMs?.() ?? null })) return;
+      const c = chosenClockIn(timeRef.current, Date.now());
+      if (c) onConfirm(c.atIso, true);
+    }, 15_000);
+    return () => clearInterval(id);
+  }, [suggestedAt, getLastActivityMs, onConfirm]);
 
   const confirmChosen = () => {
     if (!chosen) {
@@ -44,13 +63,15 @@ const ClockInPanel: React.FC<Omit<ClockInDialogProps, 'isOpen'>> = ({ onClose, o
         Clock in
       </h2>
       <p className="mt-1 text-[length:var(--fs-small)] text-[var(--text-muted)]">
-        Start the workday now, or say when you came in.
+        {suggestedAt
+          ? `You started working around ${localTimeStr(new Date(suggestedAt))}. Change the time if that is wrong; it confirms itself in ${AUTO_CONFIRM_MS / 60000} minutes.`
+          : 'Start the workday now, or say when you came in.'}
       </p>
 
       <button
         type="button"
         data-autofocus
-        onClick={() => onConfirm(new Date().toISOString())}
+        onClick={() => onConfirm(suggestedAt && chosen ? chosen.atIso : new Date().toISOString())}
         className="mt-5 w-full h-11 rounded-[var(--radius-btn)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[var(--on-accent)] text-[length:var(--fs-body)] font-bold cursor-pointer transition-colors"
       >
         Clock in

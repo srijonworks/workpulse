@@ -91,6 +91,7 @@ import { SaveStatusBanner } from './components/SaveStatusBanner';
 import { DiskCopyBanner } from './components/DiskCopyBanner';
 import { useHeartbeat } from './hooks/useHeartbeat';
 import { useAutoProjects } from './hooks/useAutoProjects';
+import { useAutoDay } from './hooks/useAutoDay';
 import { writeHeartbeat } from './utils/heartbeat';
 import { desktopBridge } from './utils/desktopBridge';
 import { recordRepairs, repairData } from './utils/dataDoctor';
@@ -141,6 +142,8 @@ export default function App() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isActivityOpen, setIsActivityOpen] = useState(false);
   const [isClockInOpen, setIsClockInOpen] = useState(false);
+  // Set when the start-of-day popup opened by itself: the time it suggests (ISO).
+  const [startSuggested, setStartSuggested] = useState<string | null>(null);
   // End my day: closed (null), or open on its first open step (undefined) or on a chosen step.
   const [endDay, setEndDay] = useState<{ step?: StepId } | null>(null);
   // Tasks taken from the phone since the app opened, shown in the next morning's Plan your day.
@@ -448,8 +451,9 @@ export default function App() {
   };
 
   // The office clock. Functional updates, so two calls in a row both stick.
-  const handleClockIn = (atIso?: string) => {
+  const handleClockIn = (atIso?: string, auto?: boolean) => {
     const at = atIso ?? new Date().toISOString();
+    setStartSuggested(null);
     // The first clock-in of today starts the day, so Plan your day follows (not after Resume, not
     // when the date already has a record, and not for "I came in yesterday at").
     const date = localDateOfIso(at);
@@ -461,7 +465,8 @@ export default function App() {
     });
     setIsClockInOpen(false);
     // Runs inside the click that clocked in, so the browser allows the new tab.
-    if (firstOfDate && settingsRef.current.clockInMessageEnabled !== false) {
+    // A clock-in that confirmed itself runs outside a click, so the browser would block the new tab: it is skipped.
+    if (firstOfDate && !auto && settingsRef.current.clockInMessageEnabled !== false) {
       const plan = clockInOpenPlan(settingsRef.current.clockInChat, buildClockInMessage(settingsRef.current.clockInMessage, at));
       if (plan.copy) void navigator.clipboard?.writeText(plan.copy).catch(() => {});
       window.open(plan.url, '_blank', 'noopener');
@@ -512,6 +517,16 @@ export default function App() {
       if (next !== prev) saveWorkdays(next);
       return next;
     });
+  };
+
+  // The safety net closed a day (see hooks/useAutoDay): the time is the last time the PC was in use, not now.
+  const handleAutoClockOut = (date: string, atIso: string) => {
+    setWorkdays((prev) => {
+      const next = clockOut(prev, date, atIso);
+      if (next !== prev) saveWorkdays(next);
+      return next;
+    });
+    addToast(`${date === localDateStr() ? 'Today' : date} was closed automatically at ${localTimeStr(new Date(atIso))}. Use Resume to reopen it.`, 'info');
   };
 
   const handleResume = (date: string) => {
@@ -1352,7 +1367,20 @@ export default function App() {
   });
   const diskCopyState = useDiskCopyState();
   // "Alive now" every 30 s: after a shutdown it says when the PC was last in use (the automatic day uses it later).
-  useHeartbeat(dataLoaded);
+  const lastAlive = useHeartbeat(dataLoaded);
+  const autoDay = useAutoDay({
+    enabled: dataLoaded && settings.autoDayEnabled !== false,
+    workdays,
+    logs,
+    settings,
+    lastAliveMs: lastAlive.current,
+    promptOpen: isClockInOpen,
+    openStartPrompt: (iso) => {
+      setStartSuggested(iso);
+      setIsClockInOpen(true);
+    },
+    autoClockOut: handleAutoClockOut,
+  });
   // Projects appear on their own from the folders you work in (see hooks/useAutoProjects).
   useAutoProjects({
     enabled: dataLoaded,
@@ -1737,7 +1765,17 @@ export default function App() {
       )}
       <ErrorBoundary area="the clock in window" variant="dialog" onClose={() => setIsClockInOpen(false)}>
         <CrashProbe where="dialog" />
-        <ClockInDialog isOpen={isClockInOpen} onClose={() => setIsClockInOpen(false)} onConfirm={handleClockIn} />
+        <ClockInDialog
+          isOpen={isClockInOpen}
+          onClose={() => {
+            setIsClockInOpen(false);
+            if (startSuggested) autoDay.dismissToday();
+            setStartSuggested(null);
+          }}
+          onConfirm={handleClockIn}
+          suggestedAt={startSuggested ?? undefined}
+          getLastActivityMs={autoDay.getLastActivityMs}
+        />
       </ErrorBoundary>
 
       <ErrorBoundary area="the plan your day window" variant="dialog" onClose={() => setPlan(null)}>
