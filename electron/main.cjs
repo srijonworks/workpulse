@@ -171,9 +171,15 @@ function setupUpdates() {
       });
   });
   autoUpdater.on('update-not-available', () => setUpdateState({ status: 'current', checkedAt: Date.now() }));
-  autoUpdater.on('error', () =>
-    setUpdateState({ status: 'error', message: 'Could not check for updates. Close and reopen WorkPulse, then try again.' }),
-  );
+  autoUpdater.on('error', (err) => {
+    // No feed yet (nothing was built for release, or the local update server is not answering) is "nothing new", not a fault.
+    const said = String((err && err.message) || err || '');
+    if (/404|latest\.yml|ECONNREFUSED|ENOENT|Cannot find/i.test(said)) {
+      setUpdateState({ status: 'current', checkedAt: Date.now(), message: '' });
+      return;
+    }
+    setUpdateState({ status: 'error', message: 'Could not check for updates. Close and reopen WorkPulse, then try again.' });
+  });
   const check = () => autoUpdater.checkForUpdates().catch(() => {});
   check();
   setInterval(check, 30 * 60 * 1000);
