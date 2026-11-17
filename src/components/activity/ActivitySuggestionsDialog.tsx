@@ -178,6 +178,7 @@ export const ActivitySuggestionsPanel: React.FC<ActivitySuggestionsPanelProps> =
 
   const run = useCallback(async (forDate: string, background = false) => {
     const seq = ++scanSeq.current;
+    const startedAt = Date.now();
     if (!background) setError('');
     try {
       const l = latest.current;
@@ -189,6 +190,12 @@ export const ActivitySuggestionsPanel: React.FC<ActivitySuggestionsPanelProps> =
         sameAs: background ? cur?.result.itemsKey : undefined,
       });
       if (seq !== scanSeq.current) return;
+      // A check the user asked for keeps its "Reading your activity..." in view for a moment, so a fast scan still shows it ran.
+      if (!background) {
+        const wait = 700 - (Date.now() - startedAt);
+        if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+        if (seq !== scanSeq.current) return;
+      }
       const now = Date.now();
       if (r.unchanged && cur) {
         setActivitySession(forDate, { ...cur, checkedAt: now, tasksKey: l.tasksKey });
@@ -479,6 +486,13 @@ export const ActivitySuggestionsPanel: React.FC<ActivitySuggestionsPanelProps> =
               {addedCount > 0 ? 'Close this window or pick another day.' : 'Pick another day, or check the folders and sources in Settings.'}
             </p>
           )}
+          {compact && addedCount === 0 && sourceLines.length > 0 && (
+            <ul className="text-[length:var(--fs-small)] text-[var(--text-muted)] space-y-0.5">
+              {sourceLines.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          )}
         </div>
       ) : compact ? (
         <ul>
@@ -596,7 +610,8 @@ export const ActivitySuggestionsPanel: React.FC<ActivitySuggestionsPanelProps> =
         {footer}
         {hasSetup && (view === 'ready' || view === 'error') && (
           <div className="pt-2 flex items-center justify-end gap-3">
-            {session && <span className="text-[length:var(--fs-small)] text-[var(--text-muted)]">Checked {timeOf(session.checkedAt)}</span>}
+            {session && view === 'ready' && <span role="status" className="text-[length:var(--fs-small)] text-[var(--text-muted)]">Checked {timeOf(session.checkedAt)} · {rows.length === 0 ? 'nothing new' : `${rows.length} found`}</span>}
+            {session && view !== 'ready' && <span className="text-[length:var(--fs-small)] text-[var(--text-muted)]">Checked {timeOf(session.checkedAt)}</span>}
             {scanAgain}
           </div>
         )}
