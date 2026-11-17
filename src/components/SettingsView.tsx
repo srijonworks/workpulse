@@ -59,6 +59,7 @@ interface SettingsViewProps {
   onUpdateSettings: (patch: Partial<AppSettings>) => void;
   /** Creates or reuses the project named after the folder and links the folder, saved at once. */
   onAddProjectWithFolder: (input: { name?: string; color?: string; path?: string }) => ActionResult;
+  onAddProjectsFromFolders: (paths: string[]) => ActionResult;
   onSetProjectFolder: (projectId: string, oldPath: string | undefined, newPath: string) => ActionResult;
   onRemoveProjectFolder: (path: string) => void;
   onTrashProject: (id: string) => void;
@@ -155,6 +156,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   sheetBackup,
   onUpdateSettings,
   onAddProjectWithFolder,
+  onAddProjectsFromFolders,
   onSetProjectFolder,
   onRemoveProjectFolder,
   onTrashProject,
@@ -467,6 +469,7 @@ Your current Gemini API key is kept. Export a backup first if you want to keep y
               logs={logs}
               backlog={backlog}
               onAddProjectWithFolder={onAddProjectWithFolder}
+              onAddProjectsFromFolders={onAddProjectsFromFolders}
               onSetProjectFolder={onSetProjectFolder}
               onRemoveProjectFolder={onRemoveProjectFolder}
               onTrashProject={onTrashProject}

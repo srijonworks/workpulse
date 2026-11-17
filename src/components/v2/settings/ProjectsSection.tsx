@@ -9,6 +9,7 @@ import { projectUse, shortFolder, trashedProjectsOf } from '../../../utils/proje
 import { IconButton } from '../../ui/IconButton';
 import { ModalShell } from '../../ui/ModalShell';
 import { SWATCHES, Swatches } from '../ProjectSwatches';
+import { BulkProjects } from './BulkProjects';
 
 export type ActionResult = { ok: boolean; message: string };
 
@@ -22,6 +23,8 @@ interface ProjectsSectionProps {
   onUpdateProjects(p: Project[]): void;
   onUpdateTags(t: string[]): void;
   onAddProjectWithFolder(input: { name?: string; color?: string; path?: string }): ActionResult;
+  /** One project per folder, all at once ("Add all projects in a folder"). */
+  onAddProjectsFromFolders(paths: string[]): ActionResult;
   onSetProjectFolder(projectId: string, oldPath: string | undefined, newPath: string): ActionResult;
   onRemoveProjectFolder(path: string): void;
   onTrashProject(id: string): void;
@@ -308,6 +311,7 @@ export const ProjectsSection: React.FC<ProjectsSectionProps> = ({
   onUpdateProjects,
   onUpdateTags,
   onAddProjectWithFolder,
+  onAddProjectsFromFolders,
   onSetProjectFolder,
   onRemoveProjectFolder,
   onTrashProject,
@@ -430,6 +434,8 @@ export const ProjectsSection: React.FC<ProjectsSectionProps> = ({
           </div>
         </form>
       </div>
+
+      <BulkProjects folders={folders} onAddMany={onAddProjectsFromFolders} onNote={setNote} />
 
       <div className="flex flex-col gap-3">
         <h3 className="text-[length:var(--fs-body)] font-bold text-[var(--text-main)]">Tags</h3>

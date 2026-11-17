@@ -55,6 +55,7 @@ import { useStableCallback } from './hooks/useStableCallback';
 import { planProjectWithFolder, relinkFolder, unlinkFolder } from './utils/projectFromFolder';
 import { defaultProject, deleteProjectForever, liveProjectsOf, restoreProject, trashProject } from './utils/projects';
 import { parseWidgetTask } from './utils/widgets';
+import { bulkMessage, planBulkProjects } from './utils/bulkProjects';
 import { usePhoneSync } from './hooks/usePhoneSync';
 import { useSheetBackup } from './hooks/useSheetBackup';
 import { useWidgetBridge } from './hooks/useWidgetBridge';
@@ -1112,6 +1113,18 @@ export default function App() {
     };
   };
 
+  // "Add all projects in a folder": every chosen folder becomes a project linked to it, saved in one go.
+  const handleAddProjectsFromFolders = (paths: string[]): { ok: boolean; message: string } => {
+    if (paths.length === 0) return { ok: false, message: 'Nothing was ticked.' };
+    const plan = planBulkProjects(projects, settingsRef.current.activityFolders ?? [], paths, Date.now());
+    if (plan.projects !== projects) {
+      setProjects(plan.projects);
+      saveProjects(plan.projects);
+    }
+    if (plan.folders.length !== (settingsRef.current.activityFolders ?? []).length) updateSettings({ activityFolders: plan.folders });
+    return { ok: plan.created + plan.reused > 0, message: bulkMessage(plan) };
+  };
+
   // "Change" (oldPath given) or "Add folder" on a project row.
   const handleSetProjectFolder = (projectId: string, oldPath: string | undefined, newPath: string): { ok: boolean; message: string } => {
     const res = relinkFolder(projects, settingsRef.current.activityFolders ?? [], projectId, oldPath, newPath.trim());
@@ -1656,6 +1669,7 @@ export default function App() {
     addLog: useStableCallback(handleAddLog),
     createProject: useStableCallback(handleAddProject),
     addProjectWithFolder: useStableCallback(handleAddProjectWithFolder),
+    addProjectsFromFolders: useStableCallback(handleAddProjectsFromFolders),
     setProjectFolder: useStableCallback(handleSetProjectFolder),
     removeProjectFolder: useStableCallback(handleRemoveProjectFolder),
     trashProject: useStableCallback(handleTrashProject),
@@ -1916,6 +1930,7 @@ export default function App() {
             sheetBackup={{ status: sheetBackup.status, backupNow: sheetBackup.backupNow, restore: handleRestoreFromSheet }}
             onUpdateSettings={updateSettings}
             onAddProjectWithFolder={h.addProjectWithFolder}
+            onAddProjectsFromFolders={h.addProjectsFromFolders}
             onSetProjectFolder={h.setProjectFolder}
             onRemoveProjectFolder={h.removeProjectFolder}
             onTrashProject={h.trashProject}

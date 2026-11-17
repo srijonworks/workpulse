@@ -1325,6 +1325,34 @@ def fine_dropdown_and_date_picker(s):
     s.no_errors()
 
 
+@check("projects_add_all_in_folder")
+def projects_add_all_in_folder(s):
+    """Settings > Projects & tags > Add all projects in a folder (the folder window and the search are stubbed): the
+    projects found are listed, an already linked one cannot be ticked, and each ticked folder becomes a linked project."""
+    p = s.page
+    p.route("**/api/pick-folder", lambda route: route.fulfill(json={"path": "E:\work"}))
+    p.route("**/api/activity/discover", lambda route: route.fulfill(json={"repos": ["E:\work\hims", "E:\work\dcim", "E:\work\isp-crm"]}))
+    settings = s.ls("workpulse_settings")
+    settings["activityFolders"] = [{"path": "E:\work\dcim", "projectId": "proj-1"}]
+    s.set_ls("workpulse_settings", settings)
+    s.reload()
+    s.settings_section("Projects & tags")
+    btn(p, "Add all projects in a folder", exact=True).click()
+    dlg = p.get_by_role("dialog", name=re.compile("Projects found in"))
+    expect(dlg).to_be_visible()
+    expect(dlg.get_by_role("checkbox")).to_have_count(3)
+    expect(dlg.get_by_role("checkbox", name=re.compile("dcim"))).to_be_disabled()
+    expect(btn(dlg, "Add 2 projects", exact=True)).to_be_visible()
+    dlg.get_by_role("checkbox", name=re.compile("isp-crm")).uncheck()
+    btn(dlg, "Add 1 project", exact=True).click()
+    expect(dlg).to_have_count(0)
+    names = [pr["name"] for pr in s.ls("workpulse_projects")]
+    assert "hims" in names and "isp-crm" not in names, names
+    links = [f["path"] for f in s.ls("workpulse_settings")["activityFolders"]]
+    assert sorted(links) == ["E:\work\dcim", "E:\work\hims"], links
+    s.no_errors()
+
+
 @check("error_boundary_isolates_screen")
 def error_boundary_isolates_screen(s):
     """A screen that breaks shows a plain message and a way forward, the other screens keep working, and the data is
