@@ -26,6 +26,8 @@ const CODE_MESSAGES: Record<string, string> = {
   bad_request: 'The Sheet script did not understand the request. Update and redeploy the script.',
   bad_response: 'The Sheet script did not answer as expected. Update and redeploy the script.',
   busy: 'The Sheet is busy with another request. WorkPulse will try again.',
+  mail_failed: 'Google could not send the email just now.',
+  script_old: 'Your Sheet script is older than version 6. Re-paste the latest script and update your existing deployment.',
   timeout: 'The Sheet did not answer in time. WorkPulse will try again later.',
   unreachable: 'WorkPulse could not reach Google from this computer. Check the internet connection, then try again.',
   not_deployed: 'Google returned a web page instead of the script response. Deploy the script as a Web app with "Who has access" set to "Anyone", and check the URL ends in /exec.',
@@ -158,6 +160,106 @@ export async function loadBackupFromSheet(
     return { ok: false, message: 'The Sheet sent back an empty copy. Update the script and try again.', code: 'bad_response' };
   }
   return { ok: true, message: r.message, data: { backup: r.data.backup, savedAt: typeof r.data.savedAt === 'string' ? r.data.savedAt : '' } };
+}
+
+/** The first script version that has saveHistory, sendDayEmail, emailStatus and cancelDayEmail. Gate desktop features on `getScriptVersion(url) >= HISTORY_SCRIPT_VERSION`. */
+export const HISTORY_SCRIPT_VERSION = 6;
+
+const OLD_SCRIPT = 'Your Sheet script is older than version 6. Re-paste the latest script and update your existing deployment (Deploy, Manage deployments, edit, New version).';
+
+// A script older than version 6 does not know these actions and answers any unknown action with { status: 'ok' }, so the
+// answer must carry this version's own fields to count.
+async function needsV6<T>(r: PhoneApiResult<T>, proves: (d: Record<string, unknown>) => boolean): Promise<PhoneApiResult<T>> {
+  if (!r.ok) return r;
+  const d = (r.data && typeof r.data === 'object' ? r.data : {}) as Record<string, unknown>;
+  return proves(d) ? r : { ok: false, message: OLD_SCRIPT, code: 'script_old' };
+}
+
+export interface DayHistoryRow {
+  date: string;
+  clockIn?: string;
+  clockOut?: string;
+  workedMinutes: number;
+  loggedMinutes: number;
+  logCount: number;
+  closedAt?: string;
+}
+
+export interface StandupRow {
+  id: string;
+  kind: 'day' | 'week';
+  from: string;
+  to: string;
+  text: string;
+  writer: string;
+  createdAt: string;
+  editedAt?: string;
+}
+
+/** Adds or updates the day history and standup rows in the Sheet (script version 6). Rows are keyed by date / id; nothing is deleted. */
+export async function saveHistory(
+  url: string,
+  token: string,
+  history: { days?: DayHistoryRow[]; standups?: StandupRow[] },
+): Promise<PhoneApiResult<{ days: number; standups: number }>> {
+  const r = await call<{ days?: unknown; standups?: unknown }>(url, 'saveHistory', { token, days: history.days ?? [], standups: history.standups ?? [] }, 'History saved to the Sheet.');
+  return needsV6(r, (d) => typeof d.days === 'number' && typeof d.standups === 'number') as Promise<PhoneApiResult<{ days: number; standups: number }>>;
+}
+
+/** What identifies one standup email: a day, or a week from its first to its last day. */
+export type DayEmailTarget = { kind: 'day'; date: string } | { kind: 'week'; from: string; to: string };
+
+/** The key the script uses for a target (the same one emailStatus reports). */
+export function dayEmailKey(t: DayEmailTarget): string {
+  return t.kind === 'day' ? `day|${t.date}|${t.date}` : `week|${t.from}|${t.to}`;
+}
+
+export type DayEmailState = 'sent' | 'pending' | 'failed' | 'skipped';
+
+export interface DayEmailAnswer {
+  state: DayEmailState;
+  key: string;
+  sendAt?: string;
+  sentAt?: string;
+  duplicate?: boolean;
+}
+
+/** Mails the standup text saved for the target (script version 6). At most once per key; `delayMinutes` above 0 sends it later. */
+export async function sendDayEmail(
+  url: string,
+  token: string,
+  target: DayEmailTarget,
+  opts: { delayMinutes?: number; requestId?: string } = {},
+): Promise<PhoneApiResult<DayEmailAnswer>> {
+  const r = await call<DayEmailAnswer>(url, 'sendDayEmail', { token, ...target, delayMinutes: opts.delayMinutes ?? 0, requestId: opts.requestId }, 'Standup email handled.');
+  return needsV6(r, (d) => typeof d.state === 'string');
+}
+
+export interface DayEmailStatus {
+  key: string;
+  state: 'sent' | 'pending' | 'failed';
+  tries: number;
+  sentAt?: string;
+  sendAt?: string;
+  error?: string;
+  willRetry?: boolean;
+}
+
+/** Sent, waiting or failed for the given targets (all of them when none are given; script version 6). */
+export async function getEmailStatus(url: string, token: string, targets?: DayEmailTarget[]): Promise<PhoneApiResult<{ items: DayEmailStatus[] }>> {
+  const fields: Record<string, unknown> = { token };
+  if (targets) fields.keys = targets.map(dayEmailKey);
+  const r = await call<{ items?: unknown }>(url, 'emailStatus', fields, 'Checked the standup emails.');
+  const proved = await needsV6(r, (d) => Array.isArray(d.items));
+  if (!proved.ok) return proved as PhoneApiResult<never>;
+  const items = ((proved.data?.items as unknown[]) ?? []).filter((x): x is DayEmailStatus => !!x && typeof x === 'object' && typeof (x as DayEmailStatus).key === 'string');
+  return { ok: true, message: proved.message, data: { items } };
+}
+
+/** Stops a waiting standup email (script version 6). A sent email stays sent. */
+export async function cancelDayEmail(url: string, token: string, target: DayEmailTarget): Promise<PhoneApiResult<{ cancelled: boolean }>> {
+  const r = await call<{ cancelled?: unknown }>(url, 'cancelDayEmail', { token, ...target }, 'Standup email cancelled.');
+  return needsV6(r, (d) => typeof d.cancelled === 'boolean') as Promise<PhoneApiResult<{ cancelled: boolean }>>;
 }
 
 export function resetPhoneAccess(

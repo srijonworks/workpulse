@@ -62,6 +62,7 @@ export function backupSignature(d: BackupData): string {
     d.tags,
     d.workdays ?? {},
     backupSettings(d.settings),
+    ...(d.standups && d.standups.length > 0 ? [d.standups.map((s) => ({ ...s, syncedAt: undefined }))] : []),
   ]);
 }
 

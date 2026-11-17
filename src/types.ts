@@ -181,4 +181,22 @@ export interface BackupData {
   settings: AppSettings;
   // Absent in backups made before the office clock existed.
   workdays?: Workdays;
+  // Absent in backups made before saved standups existed (an import then leaves the stored ones alone).
+  standups?: StandupRecord[];
+}
+
+/** A standup kept after it was written: one per closed day, one per week (Friday to Thursday). */
+export interface StandupRecord {
+  id: string; // 'day:<YYYY-MM-DD>' or 'week:<YYYY-MM-DD of the Thursday>'
+  kind: 'day' | 'week';
+  from: string; // YYYY-MM-DD
+  to: string; // YYYY-MM-DD
+  text: string;
+  writer: 'claude' | 'gemini' | 'template';
+  // Plain sentence: why the preferred writer was not used.
+  notice?: string;
+  createdAt: string;
+  // Set when the user edited the text; the app never overwrites an edited standup.
+  editedAt?: string;
+  syncedAt?: string;
 }

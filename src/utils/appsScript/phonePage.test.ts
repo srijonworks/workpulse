@@ -24,6 +24,7 @@ describe('phone page HTML', () => {
     expect(pageScript).toContain('google.script.run');
     expect(pageScript).toMatch(/\.phoneData\(/);
     expect(pageScript).toMatch(/\.phoneAddTask\(/);
+    expect(pageScript).toMatch(/\.phoneAddLog\(/);
     expect(pageScript).toMatch(/\.phoneOlderLogs\(/);
   });
 

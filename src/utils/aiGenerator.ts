@@ -4,6 +4,12 @@ import { requestJson } from './net/http';
 import { AI_REQUEST_TIMEOUT_MS } from './net/timeouts';
 import type { ActivityAi } from './activity/types';
 
+export interface ReportPeriod {
+  from: string;
+  to: string;
+  label: string;
+}
+
 export interface GenerateReportParams {
   logs: WorkLog[];
   format: ReportFormat;
@@ -13,6 +19,10 @@ export interface GenerateReportParams {
   /** Only sent to the server when `ai` is 'gemini'. */
   customApiKey?: string;
   recipientName?: string;
+  /** The days the report covers. Without it the report is for today. */
+  period?: ReportPeriod;
+  /** Extra background for the prompt (dates, earlier daily standups), already redacted and capped. */
+  context?: string;
   /** For tests. */
   fetchFn?: typeof fetch;
 }
@@ -40,7 +50,7 @@ export function standupRequestBody(
 }
 
 export async function generateAiReport(params: GenerateReportParams): Promise<GenerateReportResult> {
-  const { logs, format, tone, customApiKey, recipientName, ai = 'claude', fetchFn = fetch } = params;
+  const { logs, format, tone, customApiKey, recipientName, ai = 'claude', fetchFn = fetch, period, context } = params;
 
   if (logs.length === 0) {
     return {
@@ -83,6 +93,11 @@ Follow the exact requested format, tone, and audience constraints faithfully.`;
 ${logsSummary}
 ---------------------------
 
+${period ? `Covers: ${period.label} (${period.from === period.to ? period.from : `${period.from} to ${period.to}`})
+` : ''}${context ? `
+Background:
+${context}
+` : ''}
 Target Format: ${formatDescription}
 Tone: ${tone} (e.g. casual & direct, formal corporate, brief bullet-only, or client-facing)
 ${recipientName ? `Addressed to: ${recipientName}` : ''}
@@ -91,7 +106,7 @@ Generate the final message text now. Do not wrap in markdown code fence unless c
 
   // "No AI": the template only, and nothing leaves the browser.
   if (ai === 'none') {
-    return { text: generateFallbackTemplate(logs, format, tone, recipientName), source: 'template' };
+    return { text: generateFallbackTemplate(logs, format, tone, recipientName, period?.label), source: 'template' };
   }
 
   // The request has a time limit and never throws: a server that is down or too slow gives the plain-sentence template below.
@@ -110,7 +125,7 @@ Generate the final message text now. Do not wrap in markdown code fence unless c
 
   // High-fidelity fallback template generator
   return {
-    text: generateFallbackTemplate(logs, format, tone, recipientName),
+    text: generateFallbackTemplate(logs, format, tone, recipientName, period?.label),
     source: 'template',
     error,
   };
@@ -120,16 +135,19 @@ export function generateFallbackTemplate(
   logs: WorkLog[],
   format: ReportFormat,
   tone: ReportTone,
-  recipientName?: string
+  recipientName?: string,
+  periodLabel?: string,
 ): string {
   const completed = logs.filter((l) => l.status === 'completed');
   const inProgress = logs.filter((l) => l.status === 'in_progress');
   const blocked = logs.filter((l) => l.status === 'blocked');
-  const todayStr = new Date().toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  });
+  const todayStr =
+    periodLabel ??
+    new Date().toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    });
 
   const greeting = recipientName
     ? tone === 'casual'

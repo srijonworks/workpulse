@@ -790,17 +790,23 @@ def history_week(s):
     day = week.get_by_role("button", name=re.compile(r", today$"))
     expect(day).to_have_count(1)
     expect(day).to_contain_text(hm(minutes))
-    logs_region = p.get_by_role("region", name=SEL["logs_region"])
     todays = [l for l in s.ls("workpulse_logs") if l["date"] == today]
     day.click()
     p.wait_for_timeout(250)
     expect(day).to_have_attribute("aria-pressed", "true")
-    expect(logs_region.get_by_role("heading", level=2)).to_contain_text(" on ")
-    assert logs_region.get_by_role("heading", level=3).count() == 1, "picking a day should show only that day"
-    assert logs_region.get_by_role("checkbox").count() == len(todays), "the picked day shows the wrong logs"
-    day.click()  # again: the whole week
+    # the picked day has its own panel: clock times, totals, and every log of that day
+    panel = p.get_by_role("region", name=re.compile(r"^Today"))
+    expect(panel).to_be_visible()
+    assert panel.get_by_role("checkbox").count() == len(todays), "the picked day shows the wrong logs"
+    expect(panel).to_contain_text("Worked")
+    # the date field and Yesterday move the panel to another day
+    btn(p, "Yesterday", exact=True).click()
     p.wait_for_timeout(250)
-    expect(day).to_have_attribute("aria-pressed", "false")
+    yesterday = (datetime.date.fromisoformat(today) - datetime.timedelta(days=1)).isoformat()
+    assert p.evaluate("() => document.querySelector('input[type=date]')?.value") == yesterday, "Yesterday did not move the day panel"
+    btn(p, "Today", exact=True).click()
+    p.wait_for_timeout(250)
+    assert p.evaluate("() => document.querySelector('input[type=date]')?.value") == today, "Today did not bring the panel back"
     # Export menu
     btn(p, SEL["export"]).click()
     menu = p.get_by_role("menu")

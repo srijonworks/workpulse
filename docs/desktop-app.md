@@ -4,7 +4,7 @@ The desktop app is the same WorkPulse in its own window. `electron/main.cjs` sta
 `electron/app/server.cjs` by `scripts/build-desktop.mjs`) on **127.0.0.1:38417** and opens `http://localhost:38417` in a window.
 
 ## Install
-Run `C:\Users\DELL\wp-release\WorkPulse Setup 1.0.0.exe`. Windows may say "unknown publisher" (the app is not code-signed): More info, Run anyway.
+Run the newest `WorkPulse Setup <version>.exe` in `C:\Users\DELL\wp-release`. Windows may say "unknown publisher" (the app is not code-signed): More info, Run anyway.
 
 ## Use
 - Closing the window hides WorkPulse to the tray (timers keep running). Tray icon: Open, **Start with Windows**, Quit.
@@ -30,3 +30,20 @@ Run `C:\Users\DELL\wp-release\WorkPulse Setup 1.0.0.exe`. Windows may say "unkno
   carries `allowScripts` for `electron@39.8.10`. If the binary is still missing (`electron/node_modules/electron/dist/electron.exe`), run
   `npm --prefix electron rebuild electron`, or `node electron/node_modules/electron/install.js`.
 - The updater only works while `wp-release` exists on this PC. For other PCs the installers would have to be hosted (e.g. GitHub Releases).
+
+## Staying alive and keeping data safe
+- **One instance.** Starting WorkPulse a second time only brings the first window forward.
+- **A crashed or frozen page comes back.** If the window's page crashes, it reloads after a short wait that grows each time. After several
+  crashes in a row the app stops and says so (choose Quit in the tray, then open it again) instead of looping. A page that does not answer
+  for 30 seconds is restarted, and a page that fails to load is tried again every 3 seconds.
+- **A stray error does not end the day.** After start-up, an unexpected error in the main process is logged and the tray app keeps running.
+  Before start-up the app shows why it cannot start, then quits.
+- **Saving before it stops.** On quit, sleep, screen lock and sign-out the app asks the page to write everything it holds in memory
+  (running timers, anything not saved yet) and waits up to 1.5 seconds, then flushes the browser storage to disk.
+- **Start with Windows, hidden.** The login item starts WorkPulse with `--hidden`: it goes straight to the tray with no window. It is set
+  once; a later choice in the tray menu is kept.
+- **Copies and logs on disk.** `%USERPROFILE%\WorkPulse\backups\<app address>\` holds copies of your data (the page makes one a few seconds
+  after a change; "Restore" offers them if the app's storage is ever wiped). `%USERPROFILE%\WorkPulse\logs\` holds a small log: what
+  happened and where, never what you wrote. Settings -> System status shows how all of this is doing; see `docs/system-status.md`.
+- **A test copy** does not touch the installed app: set `WORKPULSE_USER_DATA` (its own storage and single-instance lock) and, for another
+  address, `WORKPULSE_TEST_PORT`; use `--data-dir=temp` or `WORKPULSE_DATA_DIR` for the server's folder.

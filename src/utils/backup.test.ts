@@ -153,3 +153,24 @@ describe('project folder links in backups', () => {
     expect(junk.ok && junk.data.settings.activityFolders).toBeUndefined();
   });
 });
+
+describe('standups in backups', () => {
+  const standups = [{ id: 'day:2026-11-10', kind: 'day' as const, from: '2026-11-10', to: '2026-11-10', text: 'hi', writer: 'claude' as const, createdAt: 'c' }];
+  it('round trip keeps standups', () => {
+    const r = parseBackup(buildBackup({ ...data(), standups }));
+    expect(r.ok && r.data.standups).toEqual(standups);
+  });
+  it('an old backup without standups imports with undefined and leaves stored ones alone', () => {
+    const { standups: _omit, ...old } = JSON.parse(buildBackup(data()));
+    const r = parseBackup(JSON.stringify(old));
+    expect(r.ok && r.data.standups).toBeUndefined();
+    expect(replaceAllData({ ...data(), standups }).ok).toBe(true);
+    expect(JSON.parse(localStorage.getItem('workpulse_standups')!)).toEqual(standups);
+    expect(replaceAllData({ ...data() }).ok).toBe(true);
+    expect(JSON.parse(localStorage.getItem('workpulse_standups')!)).toEqual(standups);
+  });
+  it('rejects invalid standups', () => {
+    const r = parseBackup(JSON.stringify({ ...JSON.parse(buildBackup(data())), standups: 5 }));
+    expect(r.ok).toBe(false);
+  });
+});

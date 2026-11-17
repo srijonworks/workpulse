@@ -24,6 +24,8 @@ import type { ActivityAi, ActivitySources } from '../utils/activity/types';
 import { backupStatus, describeBackupAge } from '../utils/backupReminder';
 import { findMisdatedLogs, DateFix } from '../utils/logDates';
 import { UpdatesSection } from './v2/settings/UpdatesSection';
+import { SystemStatusSection } from './v2/settings/SystemStatusSection';
+import { buildSystemStatus, type StatusAction, type SystemStatusInput } from '../utils/systemStatus';
 import { WidgetsSection } from './v2/settings/WidgetsSection';
 import { logsToCsv } from '../utils/exportLogs';
 import { GOOGLE_APPS_SCRIPT_CODE } from '../utils/googleAppsScriptTemplate';
@@ -61,6 +63,10 @@ interface SettingsViewProps {
   onTrashProject: (id: string) => void;
   onRestoreProject: (id: string) => void;
   onDeleteProjectForever: (id: string) => void;
+  /** What the System status section shows (built here with buildSystemStatus). */
+  systemInput: SystemStatusInput;
+  /** A row's button: retry the saves, open a Settings section, or download a backup. */
+  onSystemAction: (action: StatusAction) => void;
 }
 
 const SECTIONS = [
@@ -74,6 +80,7 @@ const SECTIONS = [
   { id: 'activity', label: 'Activity suggestions' },
   { id: 'data', label: 'Data & backup' },
   { id: 'updates', label: 'App updates' },
+  { id: 'system', label: 'System status' },
   { id: 'sample', label: 'Sample data' },
 ] as const;
 
@@ -151,6 +158,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onTrashProject,
   onRestoreProject,
   onDeleteProjectForever,
+  systemInput,
+  onSystemAction,
 }) => {
   const uid = useId();
   const [current, setCurrent] = useState<SectionId>('appearance');
@@ -723,6 +732,10 @@ Your current Gemini API key is kept. Export a backup first if you want to keep y
 
           <Section id="updates" title="App updates" intro="Check for a newer version of the WorkPulse desktop app and install it. Your data stays as it is.">
             <UpdatesSection />
+          </Section>
+
+          <Section id="system" title="System status" intro="Whether WorkPulse is saving, copying and syncing, in plain words.">
+            <SystemStatusSection status={buildSystemStatus(systemInput)} nowMs={systemInput.now} onAction={onSystemAction} onNotify={onNotify} />
           </Section>
 
           <Section

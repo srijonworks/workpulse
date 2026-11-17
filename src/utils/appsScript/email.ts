@@ -6,6 +6,10 @@
 // at most once per local date, only to the script owner, and only near the saved time) and buildEveningEmail (pure: it reads nothing
 // and sends nothing). Everything else ends with "_".
 // All user text is HTML-escaped in the HTML body; the plain-text body has no markup of its own.
+//
+// Version 6 adds the standup emails (sendDayEmail, emailStatus, cancelDayEmail: token-checked doPost actions, no new
+// public function). A one-off time trigger for a delayed standup email runs sendEveningEmail too (a trigger needs a
+// public handler), which first sends the standup emails that are due and removes their triggers.
 export const SCRIPT_EMAIL = String.raw`
 // =========================================================================
 // Evening email
@@ -76,9 +80,10 @@ function sendTestEmailAction_(c) {
 
 function emailTriggers_() {
   var all = ScriptApp.getProjectTriggers();
+  var oneOff = dayEmailTriggerIds_();
   var mine = [];
   for (var i = 0; i < all.length; i++) {
-    if (all[i].getHandlerFunction() === EMAIL_FN) mine.push(all[i]);
+    if (all[i].getHandlerFunction() === EMAIL_FN && oneOff[all[i].getUniqueId()] !== true) mine.push(all[i]);
   }
   return mine;
 }
@@ -128,6 +133,7 @@ function authorizeWorkPulse() {
 function sendEveningEmail() {
   return withLock(function () {
     var props = PropertiesService.getScriptProperties();
+    processDueDayEmails_();
     var settings = {};
     try {
       settings = JSON.parse(props.getProperty('email') || '{}') || {};
@@ -248,6 +254,273 @@ function composeEmail_(isTest, now, meta) {
     pendingPhoneCount: pendingItems_().length,
     isTest: isTest === true
   });
+}
+
+// ---- Standup emails (version 6) ----
+//
+// The standup text comes from the WorkPulse_Standups tab (saveHistory). What was sent, or is waiting for its one-off
+// trigger, is kept in the Script Property emailLog: a list of { k: key, s: 's' sent | 'p' pending | 'f' failed, t: time
+// (sent at, or due at, in ms), n: tries, e: why the last try failed, g: trigger id, d: true for a delayed send }. It is
+// kept under 9 KB (the Script Property limit) by dropping the oldest sent entries first. A key is "kind|from|to"; a key
+// is never sent twice.
+
+var DAY_EMAIL_TRIES = 3;
+var DAY_EMAIL_RETRY_MS = 10 * 60000;
+var EMAIL_LOG_MAX = 8000;
+
+function dayEmailLog_() {
+  try {
+    var list = JSON.parse(PropertiesService.getScriptProperties().getProperty('emailLog') || '[]');
+    return isArray_(list) ? list : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+function saveDayEmailLog_(list) {
+  // Oldest first. Over the limit: sent entries go first, then the oldest of the rest.
+  var text = JSON.stringify(list);
+  for (var pass = 0; pass < 2; pass++) {
+    var i = 0;
+    while (i < list.length && text.length > EMAIL_LOG_MAX) {
+      if (pass === 0 && list[i].s !== 's') {
+        i++;
+        continue;
+      }
+      list.splice(i, 1);
+      text = JSON.stringify(list);
+    }
+  }
+  PropertiesService.getScriptProperties().setProperty('emailLog', text);
+}
+
+function dayEmailTriggerIds_() {
+  var ids = {};
+  var list = dayEmailLog_();
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].g) ids[list[i].g] = true;
+  }
+  return ids;
+}
+
+function dayEmailEntry_(list, key) {
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].k === key) return list[i];
+  }
+  return null;
+}
+
+// { kind, from, to, key } from a request: day takes date (or from), week takes from and to. null when it does not fit.
+function dayEmailTarget_(c) {
+  var kind = c.kind;
+  if (kind !== 'day' && kind !== 'week') return null;
+  var from = isDateText_(c.from) ? c.from : c.date;
+  var to = kind === 'day' ? from : c.to;
+  if (!isDateText_(from) || !isDateText_(to) || to < from) return null;
+  return { kind: kind, from: from, to: to, key: kind + '|' + from + '|' + to };
+}
+
+function deleteTriggerById_(id) {
+  if (!id) return;
+  var all = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < all.length; i++) {
+    if (all[i].getUniqueId() === id) ScriptApp.deleteTrigger(all[i]);
+  }
+}
+
+// The newest saved standup text for a target, or ''.
+function standupText_(target) {
+  var ssTz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+  var rows = readTab_('WorkPulse_Standups');
+  var best = '';
+  var bestAt = '';
+  var found = false;
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    if (String(r[1]) !== target.kind || dateText_(r[2], ssTz) !== target.from || dateText_(r[3], ssTz) !== target.to) continue;
+    var at = String(r[7] || r[6] || '');
+    if (!found || at >= bestAt) {
+      best = String(r[4] || '');
+      bestAt = at;
+      found = true;
+    }
+  }
+  return best.replace(/^\s+|\s+$/g, '');
+}
+
+function dayEmailMail_(target, text) {
+  var sheetUrl = '';
+  try {
+    sheetUrl = SpreadsheetApp.getActiveSpreadsheet().getUrl();
+  } catch (err) {}
+  var subject = target.kind === 'day'
+    ? 'WorkPulse standup \u00b7 ' + dayText_(target.from, 'EEE d MMM')
+    : 'WorkPulse week standup \u00b7 ' + dayText_(target.from, 'd MMM') + ' to ' + dayText_(target.to, 'd MMM');
+  var html = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#1d2b24;white-space:pre-wrap">' + esc_(text) + '</div>' +
+    (sheetUrl ? '<p style="font-family:Arial,Helvetica,sans-serif;font-size:13px"><a href="' + esc_(sheetUrl) + '">Open your WorkPulse Sheet</a></p>' : '');
+  return { subject: subject, html: html, text: text + (sheetUrl ? '\n\nYour WorkPulse Sheet: ' + sheetUrl : '') };
+}
+
+// One send try for an entry. The try is counted and saved before the mail goes, so a crash cannot hide a try.
+// Success: sent. Failure: the reason is kept; a delayed entry gets one new timer until its tries run out.
+function attemptDayEmail_(list, entry) {
+  var parts = entry.k.split('|');
+  var text = standupText_({ kind: parts[0], from: parts[1], to: parts[2] });
+  deleteTriggerById_(entry.g);
+  entry.g = '';
+  entry.s = 'f';
+  if (text === '') {
+    entry.e = 'empty';
+    saveDayEmailLog_(list);
+    return;
+  }
+  entry.n = num_(entry.n) + 1;
+  saveDayEmailLog_(list);
+  try {
+    if (MailApp.getRemainingDailyQuota() < 1) throw new Error('quota: no emails left today');
+    sendMail_(dayEmailMail_({ kind: parts[0], from: parts[1], to: parts[2] }, text));
+    entry.s = 's';
+    entry.t = new Date().getTime();
+    entry.e = '';
+  } catch (err) {
+    var why = String(err);
+    entry.e = /quota|too many times|limit/i.test(why) ? 'quota' : /No address/.test(why) ? 'address' : 'mail';
+    if (entry.d === true && entry.n < DAY_EMAIL_TRIES && entry.e !== 'address') {
+      try {
+        var tr = ScriptApp.newTrigger(EMAIL_FN).timeBased().after(DAY_EMAIL_RETRY_MS).create();
+        entry.g = tr.getUniqueId();
+        entry.s = 'p';
+        entry.t = new Date().getTime() + DAY_EMAIL_RETRY_MS;
+      } catch (err2) {}
+    }
+  }
+  saveDayEmailLog_(list);
+}
+
+// Sends the delayed standup emails that are due, and removes timers nothing waits for. Run by sendEveningEmail under
+// the lock, so the one-off timers (whose handler is sendEveningEmail) do their work through it.
+function processDueDayEmails_() {
+  var list = dayEmailLog_();
+  var now = new Date().getTime();
+  for (var i = 0; i < list.length; i++) {
+    var e = list[i];
+    if (e && e.s === 'p' && e.d === true && num_(e.t) - 30000 <= now) attemptDayEmail_(list, e);
+  }
+  var keep = {};
+  for (var j = 0; j < list.length; j++) {
+    if (list[j] && list[j].s === 'p' && list[j].g) keep[list[j].g] = true;
+  }
+  var all = ScriptApp.getProjectTriggers();
+  var ids = dayEmailTriggerIds_();
+  for (var k = 0; k < all.length; k++) {
+    var id = all[k].getUniqueId();
+    if (all[k].getHandlerFunction() === EMAIL_FN && ids[id] === true && keep[id] !== true) ScriptApp.deleteTrigger(all[k]);
+  }
+}
+
+function dayEmailState_(e) {
+  return e.s === 's' ? 'sent' : e.s === 'p' ? 'pending' : 'failed';
+}
+
+function dayEmailInfo_(e) {
+  var info = { key: e.k, state: dayEmailState_(e), tries: num_(e.n) };
+  if (e.s === 's') info.sentAt = new Date(num_(e.t)).toISOString();
+  if (e.s === 'p') info.sendAt = new Date(num_(e.t)).toISOString();
+  if (e.e) info.error = e.e;
+  if (e.s === 'f') info.willRetry = num_(e.n) < DAY_EMAIL_TRIES && e.e !== 'empty' && e.e !== 'address';
+  return info;
+}
+
+var DAY_EMAIL_FAIL_TEXT = {
+  quota: 'Google has reached its daily limit for sending email from your account. Try again tomorrow.',
+  address: 'There is no address to send to. Type your email in the Send it to box in WorkPulse Settings and save.',
+  empty: 'There is no standup text to send.',
+  mail: 'Google could not send the email just now.'
+};
+
+// { token, kind: 'day' | 'week', date | from + to, delayMinutes?, requestId? }: the standup text and a link to the Sheet, from the
+// owner's Gmail. Sent at most once per key. With delayMinutes above 0 a one-off timer sends it later (cancelDayEmail stops it).
+// No standup text for the key: nothing is sent and the state is "skipped".
+function sendDayEmailAction_(c) {
+  var check = checkToken(c.token);
+  if (!check.ok) return errorOf_(check);
+  var target = dayEmailTarget_(c);
+  if (!target) return badRequest_('The standup email needed a day, or a first and last day of the week.');
+  var delay = c.delayMinutes == null ? 0 : Number(c.delayMinutes);
+  if (!isFinite(delay) || delay < 0 || delay > 24 * 60) return badRequest_('The delay must be between 0 and 1440 minutes.');
+  var res = tryLocked_(function () {
+    var list = dayEmailLog_();
+    var entry = dayEmailEntry_(list, target.key);
+    if (entry && entry.s === 's') return { status: 'ok', state: 'sent', key: target.key, duplicate: true };
+    if (entry && entry.s === 'p') return { status: 'ok', state: 'pending', key: target.key, duplicate: true, sendAt: new Date(num_(entry.t)).toISOString() };
+    if (entry && num_(entry.n) >= DAY_EMAIL_TRIES) {
+      return { status: 'error', code: 'mail_failed', message: DAY_EMAIL_FAIL_TEXT[entry.e] || DAY_EMAIL_FAIL_TEXT.mail, key: target.key, state: 'failed' };
+    }
+    if (standupText_(target) === '') return { status: 'ok', state: 'skipped', key: target.key, reason: 'empty' };
+    if (!entry) {
+      entry = { k: target.key, s: 'f', t: 0, n: 0, e: '', g: '', q: str_(c.requestId).slice(0, 40) };
+      list.push(entry);
+    }
+    if (delay > 0) {
+      var ms = Math.max(60000, Math.round(delay * 60000));
+      var tr;
+      try {
+        tr = ScriptApp.newTrigger(EMAIL_FN).timeBased().after(ms).create();
+      } catch (err) {
+        return { status: 'error', code: 'error', message: 'The Sheet script could not set up the timer. Redeploy the script and allow the permissions Google asks for.', key: target.key };
+      }
+      entry.d = true;
+      entry.s = 'p';
+      entry.t = new Date().getTime() + ms;
+      entry.g = tr.getUniqueId();
+      saveDayEmailLog_(list);
+      return { status: 'ok', state: 'pending', key: target.key, sendAt: new Date(entry.t).toISOString() };
+    }
+    entry.d = false;
+    attemptDayEmail_(list, entry);
+    var info = dayEmailInfo_(entry);
+    if (entry.s === 's') return { status: 'ok', state: 'sent', key: target.key, sentAt: info.sentAt };
+    return { status: 'error', code: 'mail_failed', message: DAY_EMAIL_FAIL_TEXT[entry.e] || DAY_EMAIL_FAIL_TEXT.mail, key: target.key, state: 'failed', tries: info.tries, willRetry: info.willRetry };
+  });
+  return res.got ? res.value : busyAnswer_();
+}
+
+// { token, keys?: string[] }: sent / pending / failed for each key that has an entry (all entries when no keys are given).
+function emailStatusAction_(c) {
+  var check = checkToken(c.token);
+  if (!check.ok) return errorOf_(check);
+  if (c.keys != null && !isArray_(c.keys)) return badRequest_();
+  var list = dayEmailLog_();
+  var items = [];
+  var i;
+  if (c.keys == null) {
+    for (i = 0; i < list.length; i++) items.push(dayEmailInfo_(list[i]));
+  } else {
+    for (i = 0; i < c.keys.length && i < 200; i++) {
+      var e = dayEmailEntry_(list, String(c.keys[i]));
+      if (e) items.push(dayEmailInfo_(e));
+    }
+  }
+  return { status: 'ok', items: items };
+}
+
+// { token, kind, date | from + to }: stops a waiting standup email (its timer is removed). A sent email stays sent.
+function cancelDayEmailAction_(c) {
+  var check = checkToken(c.token);
+  if (!check.ok) return errorOf_(check);
+  var target = dayEmailTarget_(c);
+  if (!target) return badRequest_('The standup email needed a day, or a first and last day of the week.');
+  var res = tryLocked_(function () {
+    var list = dayEmailLog_();
+    var entry = dayEmailEntry_(list, target.key);
+    if (!entry) return { status: 'ok', cancelled: false, state: 'none', key: target.key };
+    if (entry.s !== 'p') return { status: 'ok', cancelled: false, state: dayEmailState_(entry), key: target.key };
+    deleteTriggerById_(entry.g);
+    list.splice(list.indexOf(entry), 1);
+    saveDayEmailLog_(list);
+    return { status: 'ok', cancelled: true, state: 'none', key: target.key };
+  });
+  return res.got ? res.value : busyAnswer_();
 }
 
 // ---- The email itself (pure) ----

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { AppSettings, BacklogTask, Project, Workdays } from '../types';
+import type { AppSettings, BacklogTask, Project, WorkLog, Workdays } from '../types';
 import { desktopBridge } from '../utils/desktopBridge';
 import { localDateStr } from '../utils/dates';
 import { normalizeTheme } from '../utils/theme';
@@ -17,10 +17,15 @@ export function useWidgetBridge(input: {
   backlog: BacklogTask[];
   projects: Project[];
   workdays: Workdays;
+  /** Today's logs are summed into the Time widget's "Logged". */
+  logs: WorkLog[];
+  /** Plain sentences the widgets show as a warning (empty = none). */
+  problems?: string[];
   loaded: boolean;
   onCommand(c: WidgetCommand): void;
 }): void {
-  const { settings, backlog, projects, workdays, loaded } = input;
+  const { settings, backlog, projects, workdays, logs, loaded } = input;
+  const problemsKey = JSON.stringify(input.problems ?? []);
   const bridge = desktopBridge();
   const cmdRef = useRef(input.onCommand);
   cmdRef.current = input.onCommand;
@@ -53,6 +58,8 @@ export function useWidgetBridge(input: {
       workdayHours: settings.workdayHours,
       today: localDateStr(),
       nowMs,
+      logs,
+      problems: JSON.parse(problemsKey),
     });
     const sig = snapshotSignature(snap);
     if (sig === last.current.sig && nowMs - last.current.at < RESYNC_MS) return;

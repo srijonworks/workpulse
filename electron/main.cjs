@@ -314,6 +314,18 @@ function createTray() {
         },
       },
       {
+        label: 'Time widget',
+        type: 'checkbox',
+        checked: widgetConfig.time.on,
+        click: (item) => setWidgetFromTray('time', item.checked),
+      },
+      {
+        label: 'Tasks widget',
+        type: 'checkbox',
+        checked: widgetConfig.tasks.on,
+        click: (item) => setWidgetFromTray('tasks', item.checked),
+      },
+      {
         label: 'Check for updates',
         click: () => {
           showWindow();
@@ -330,13 +342,22 @@ function createTray() {
       },
     ]);
   tray.setContextMenu(build());
+  rebuildTrayMenu = () => tray && tray.setContextMenu(build());
   tray.on('click', showWindow);
+}
+
+// The tray's widget checkboxes follow the widget settings. The settings live in the main window, so a click is
+// handed to it as a command (it saves the choice and sends the new config back); the checkbox is redrawn then.
+let rebuildTrayMenu = () => {};
+function setWidgetFromTray(kind, on) {
+  if (win && !win.isDestroyed()) win.webContents.send('wp:command', { type: 'set-widget', kind, on });
+  rebuildTrayMenu();
 }
 
 // ---- Desktop widgets ----
 // Two small frameless windows (time, tasks) that show the same page in widget mode (`?widget=`). The main window
 // owns the data: it sends snapshots here, we pass them on, and button presses go back the same way.
-const WIDGET_SIZE = { time: { width: 232, height: 112 }, tasks: { width: 300, height: 340 } };
+const WIDGET_SIZE = { time: { width: 232, height: 148 }, tasks: { width: 300, height: 340 } };
 const widgetWins = { time: null, tasks: null };
 let widgetConfig = { time: { on: false, top: true }, tasks: { on: false, top: true } };
 let lastSnapshot = null;
@@ -411,6 +432,7 @@ function openWidget(kind, top) {
 
 function applyWidgets(config) {
   widgetConfig = config;
+  rebuildTrayMenu();
   for (const kind of ['time', 'tasks']) {
     const want = config[kind];
     const w = widgetWins[kind];

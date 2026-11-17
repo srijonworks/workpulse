@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { addDays, localDateStr } from './dates';
-import { loadStoredData, saveLogs, saveTags, saveWorkdays, rollOverTasks, replaceAllData, getEngine, CURRENT_SCHEMA_VERSION } from './storage';
+import { loadStoredData, saveLogs, saveTags, saveWorkdays, saveStandups, rollOverTasks, replaceAllData, getEngine, CURRENT_SCHEMA_VERSION } from './storage';
 
 const log = (id: string) => ({
   id,
@@ -102,6 +102,16 @@ describe('loadStoredData', () => {
   it('a corrupt key is never replaced by seed data', () => {
     localStorage.setItem('workpulse_backlog', '{bad');
     expect(loadStoredData().backlog).toEqual([]);
+  });
+
+  it('standups: old data without the key loads as [] with no warning, and a save round-trips', () => {
+    localStorage.setItem('workpulse_logs', JSON.stringify([log('a')]));
+    const r = loadStoredData();
+    expect(r.standups).toEqual([]);
+    expect(r.warnings).toEqual([]);
+    const s = [{ id: 'day:2026-11-10', kind: 'day' as const, from: '2026-11-10', to: '2026-11-10', text: 't', writer: 'template' as const, createdAt: 'c' }];
+    expect(saveStandups(s).ok).toBe(true);
+    expect(loadStoredData().standups).toEqual(s);
   });
 
   it('workdays: absent key gives an empty object and no warning', () => {

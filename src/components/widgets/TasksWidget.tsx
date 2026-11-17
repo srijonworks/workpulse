@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ExternalLink, Pause, Play, X } from 'lucide-react';
 import { desktopBridge } from '../../utils/desktopBridge';
 import { formatHms } from '../../utils/workday';
-import type { WidgetCommand, WidgetSnapshot, WidgetTask } from '../../utils/widgets';
+import { isSnapshotStale, type WidgetCommand, type WidgetSnapshot, type WidgetTask } from '../../utils/widgets';
 import { useNow } from '../v2/useNow';
 
 const send = (c: WidgetCommand) => desktopBridge()?.command(c);
@@ -24,6 +24,14 @@ export const TasksWidget: React.FC<{ snap: WidgetSnapshot | null }> = ({ snap })
   const now = useNow(1000);
   const running = snap?.tasks.filter((t) => t.state === 'running') ?? [];
   const open = snap?.tasks.filter((t) => t.state !== 'running') ?? [];
+  const stale = !!snap && isSnapshotStale(snap, now);
+  const [text, setText] = useState('');
+  const add = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!text.trim() || !snap) return;
+    send({ type: 'add-task', text: text.trim() });
+    setText('');
+  };
 
   return (
     <div className="flex h-screen flex-col overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-app)] bg-[var(--bg-surface)] text-[var(--text-main)]">
@@ -31,6 +39,7 @@ export const TasksWidget: React.FC<{ snap: WidgetSnapshot | null }> = ({ snap })
         <span className="text-[length:var(--fs-small)] font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]">
           Tasks{snap ? ` · ${snap.tasks.length}` : ''}
         </span>
+        {stale && <span className="text-[length:var(--fs-small)] font-semibold text-[var(--clock-over)]">Not updating</span>}
         <span className="flex items-center gap-0.5">
           <button type="button" aria-label="Open WorkPulse" title="Open WorkPulse" onClick={() => send({ type: 'open' })} className={ICON_BTN}>
             <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
@@ -40,6 +49,21 @@ export const TasksWidget: React.FC<{ snap: WidgetSnapshot | null }> = ({ snap })
           </button>
         </span>
       </div>
+
+      <form onSubmit={add} className="wg-btn border-b border-[var(--border-app)] px-3 py-2">
+        <label htmlFor="wg-add" className="sr-only">
+          Add a task
+        </label>
+        <input
+          id="wg-add"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Add a task (#project)"
+          autoComplete="off"
+          disabled={!snap}
+          className="v2-input h-8 w-full px-2 text-[length:var(--fs-small)]"
+        />
+      </form>
 
       {running.map((t) => (
         <div key={t.id} className="wg flex items-center gap-3 border-b border-[var(--border-app)] bg-[var(--bg-subtle)] px-3 py-2.5">

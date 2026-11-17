@@ -12,6 +12,7 @@ import {
   TaskStage,
   BackupData,
   Workdays,
+  StandupRecord,
 } from './types';
 import {
   loadStoredData,
@@ -21,6 +22,7 @@ import {
   saveTags as storeTags,
   saveSettings as storeSettings,
   saveWorkdays as storeWorkdays,
+  saveStandups as storeStandups,
   replaceAllData,
   getEngine,
   SaveResult,
@@ -51,7 +53,8 @@ import { isSampleLog, sampleCounts, withoutSampleData } from './data/sampleData'
 import { plainSheetMessage } from './utils/aiErrors';
 import { useStableCallback } from './hooks/useStableCallback';
 import { planProjectWithFolder, relinkFolder, unlinkFolder } from './utils/projectFromFolder';
-import { deleteProjectForever, liveProjectsOf, restoreProject, trashProject } from './utils/projects';
+import { defaultProject, deleteProjectForever, liveProjectsOf, restoreProject, trashProject } from './utils/projects';
+import { parseWidgetTask } from './utils/widgets';
 import { usePhoneSync } from './hooks/usePhoneSync';
 import { useSheetBackup } from './hooks/useSheetBackup';
 import { useWidgetBridge } from './hooks/useWidgetBridge';
@@ -93,6 +96,20 @@ import { useHeartbeat } from './hooks/useHeartbeat';
 import { useAutoProjects } from './hooks/useAutoProjects';
 import { useAutoDay } from './hooks/useAutoDay';
 import { useDayClose } from './hooks/useDayClose';
+import { useStandups } from './hooks/useStandups';
+import { useDelivery } from './hooks/useDelivery';
+import { readJournal } from './utils/jobs/journal';
+import { parseRepairs } from './utils/systemStatus';
+import { health } from './utils/health/registry';
+import { storageUsageBytes } from './utils/persist/engine';
+
+const safeGet = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
 import { writeHeartbeat } from './utils/heartbeat';
 import { desktopBridge } from './utils/desktopBridge';
 import { recordRepairs, repairData } from './utils/dataDoctor';
@@ -115,6 +132,8 @@ export default function App() {
   const [tags, setTags] = useState<string[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [workdays, setWorkdays] = useState<Workdays>({});
+  // Saved standups, one per closed day and one per week (see hooks/useStandups).
+  const [standups, setStandups] = useState<StandupRecord[]>([]);
 
   // Kept activity suggestions describe the setup they were made with: when the folders, the project
   // each folder is linked to, the sources or the AI writer change, forget them so a screen never
@@ -134,6 +153,8 @@ export default function App() {
   }, [activitySetupKey]);
 
   const [activeTab, setActiveTab] = useState<AppNavTab>('today');
+  // The day shown in History's day panel; kept here so it survives switching tabs.
+  const [historyDay, setHistoryDay] = useState<string>(() => localDateStr());
 
   // Dialogs
   const [isAiStandupOpen, setIsAiStandupOpen] = useState(false);
@@ -218,10 +239,11 @@ export default function App() {
   const saveTags = (v: string[]) => persist(storeTags(v));
   const saveSettings = (v: AppSettings) => persist(storeSettings(v));
   const saveWorkdays = (v: Workdays) => persist(storeWorkdays(v));
+  const saveStandups = (v: StandupRecord[]) => persist(storeStandups(v));
 
   // Records that these logs reached the Google Sheet, so they are never sent twice (B2).
-  const markLogsSynced = (ids: string[]) => {
-    const at = new Date().toISOString();
+  const markLogsSynced = (ids: string[], sentAt: string = new Date().toISOString()) => {
+    const at = sentAt;
     const idSet = new Set(ids);
     setLogs((prev) => {
       const next = prev.map((l) => (idSet.has(l.id) ? { ...l, syncedAt: at } : l));
@@ -264,6 +286,7 @@ export default function App() {
     setProjects(fixed.projects);
     setTags(loaded.tags);
     setWorkdays(fixed.workdays);
+    setStandups(loaded.standups);
     if (loaded.warnings.length > 0) {
       addToast(loaded.warnings.join(' '), 'error');
     }
@@ -551,9 +574,10 @@ export default function App() {
     if (saveLogs(updated).ok) addToast('Log added');
 
     if (settings.googleScriptUrl) {
+      const sentAt553 = new Date().toISOString(); // what the Sheet receives is the log as it is now: an edit made while the request runs must still count as unsynced
       syncSingleLogToSheet(settings.googleScriptUrl, newLog).then((res) => {
         if (res.success) {
-          markLogsSynced([newLog.id]);
+          markLogsSynced([newLog.id], sentAt553);
           addToast('Synced with Google Sheet', 'success');
         } else {
           reportSyncFailure(res.message, () => handleSyncGoogleSheet());
@@ -588,9 +612,10 @@ export default function App() {
     }
 
     if (settings.googleScriptUrl) {
+      const sentAt590 = new Date().toISOString(); // what the Sheet receives is the log as it is now: an edit made while the request runs must still count as unsynced
       syncBatchLogsToSheet(settings.googleScriptUrl, created).then((res) => {
         if (res.success) {
-          markLogsSynced(created.map((l) => l.id));
+          markLogsSynced(created.map((l) => l.id), sentAt590);
           addToast('Synced with Google Sheet', 'success');
         } else {
           reportSyncFailure(res.message, () => handleSyncGoogleSheet());
@@ -625,8 +650,9 @@ export default function App() {
       });
     }
     if (settings.googleScriptUrl) {
+      const sentAt627 = new Date().toISOString(); // what the Sheet receives is the log as it is now: an edit made while the request runs must still count as unsynced
       syncBatchLogsToSheet(settings.googleScriptUrl, created).then((res) => {
-        if (res.success) markLogsSynced(created.map((l) => l.id));
+        if (res.success) markLogsSynced(created.map((l) => l.id), sentAt627);
         else reportSyncFailure(res.message, () => handleSyncGoogleSheet());
       });
     }
@@ -936,9 +962,10 @@ export default function App() {
 
     // Automatically push to Google Sheet if linked
     if (settings.googleScriptUrl) {
+      const sentAt938 = new Date().toISOString(); // what the Sheet receives is the log as it is now: an edit made while the request runs must still count as unsynced
       syncSingleLogToSheet(settings.googleScriptUrl, newLog).then((res) => {
         if (res.success) {
-          markLogsSynced([newLog.id]);
+          markLogsSynced([newLog.id], sentAt938);
           addToast('Synced with Google Sheet', 'success');
         } else {
           reportSyncFailure(res.message, () => handleSyncGoogleSheet());
@@ -995,9 +1022,10 @@ export default function App() {
     addToast(newLogs.length === 1 ? '1 log added' : `${newLogs.length} logs added`, 'success');
 
     if (settings.googleScriptUrl) {
+      const sentAt997 = new Date().toISOString(); // what the Sheet receives is the log as it is now: an edit made while the request runs must still count as unsynced
       const res = await syncBatchLogsToSheet(settings.googleScriptUrl, newLogs);
       if (res.success) {
-        markLogsSynced(newLogs.map((l) => l.id));
+        markLogsSynced(newLogs.map((l) => l.id), sentAt997);
         addToast('Synced with Google Sheet', 'success');
       } else {
         reportSyncFailure(res.message, () => handleSyncGoogleSheet());
@@ -1135,7 +1163,7 @@ export default function App() {
     addToast('Project deleted for good. Its tasks and logs are untouched.');
   };
 
-  const backupNow = () => buildBackup({ logs, backlog, projects, tags, settings, workdays });
+  const backupNow = () => buildBackup({ logs, backlog, projects, tags, settings, workdays, standups });
 
   const handleResetSeedData = () => {
     if (
@@ -1154,6 +1182,8 @@ export default function App() {
       saveBacklog(seed.backlog);
       saveProjects(seed.projects);
       saveTags(seed.tags);
+      setStandups([]);
+      saveStandups([]);
       addToast('Reset to demo data. Your previous data was downloaded as a backup file.');
     }
   };
@@ -1218,6 +1248,8 @@ export default function App() {
       saveBacklog([]);
       saveProjects([general]);
       saveTags([]);
+      setStandups([]);
+      saveStandups([]);
       addToast('Started fresh. Your previous data was downloaded as a backup file.');
     }
   };
@@ -1252,6 +1284,7 @@ export default function App() {
       workpulse_tags: () => saveTags(tags),
       workpulse_settings: () => saveSettings(settings),
       workpulse_workdays: () => saveWorkdays(workdays),
+      workpulse_standups: () => saveStandups(standups),
     };
     write[key]?.();
   };
@@ -1291,9 +1324,10 @@ export default function App() {
     }
 
     setIsSyncingSheet(true);
+    const sentAt1293 = new Date().toISOString(); // what the Sheet receives is the log as it is now: an edit made while the request runs must still count as unsynced
     const result = await syncBatchLogsToSheet(settings.googleScriptUrl, pending).finally(() => setIsSyncingSheet(false));
     if (result.success) {
-      markLogsSynced(pending.map((l) => l.id));
+      markLogsSynced(pending.map((l) => l.id), sentAt1293);
       addToast(result.message, 'success');
     } else {
       reportSyncFailure(result.message, () => handleSyncGoogleSheet());
@@ -1313,9 +1347,10 @@ export default function App() {
       return;
     }
     setIsSyncingSheet(true);
+    const sentAt1315 = new Date().toISOString(); // what the Sheet receives is the log as it is now: an edit made while the request runs must still count as unsynced
     const result = await syncBatchLogsToSheet(settings.googleScriptUrl, all).finally(() => setIsSyncingSheet(false));
     if (result.success) {
-      markLogsSynced(all.map((l) => l.id));
+      markLogsSynced(all.map((l) => l.id), sentAt1315);
       addToast(`Sent ${all.length} ${all.length === 1 ? 'log' : 'logs'} to the Sheet.`, 'success');
     } else {
       reportSyncFailure(result.message, () => handleSyncAllLogs());
@@ -1327,9 +1362,10 @@ export default function App() {
     if (!settings.googleScriptUrl) return;
     const pending = unsyncedLogs(logs, settings.syncTrackingSince);
     if (pending.length === 0) return;
+    const sentAt1329 = new Date().toISOString(); // what the Sheet receives is the log as it is now: an edit made while the request runs must still count as unsynced
     const result = await syncBatchLogsToSheet(settings.googleScriptUrl, pending);
     if (!result.success) throw new Error(result.message);
-    markLogsSynced(pending.map((l) => l.id));
+    markLogsSynced(pending.map((l) => l.id), sentAt1329);
   };
 
   const handleToggleSelectLog = (id: string) =>
@@ -1394,22 +1430,6 @@ export default function App() {
       addToast(`${added.length} ${added.length === 1 ? 'task' : 'tasks'} added from your phone`, 'success');
     },
   });
-  // Desktop widgets: their buttons call the same handlers as the task rows.
-  useWidgetBridge({
-    settings,
-    backlog,
-    projects,
-    workdays,
-    loaded: dataLoaded,
-    onCommand: (c) => {
-      if (c.type === 'start' || c.type === 'resume') handleUpdateTaskStage(c.id, 'in_progress');
-      else if (c.type === 'pause') handlePauseTask(c.id);
-      else if (c.type === 'close') {
-        const w = settingsRef.current.widgets;
-        updateSettings({ widgets: { ...w, [c.kind]: { ...w?.[c.kind], on: false } } });
-      }
-    },
-  });
   // Failed saves are retried, and only one window writes (see hooks/usePersistence).
   usePersistence(dataLoaded);
   const saveStatus = usePersistenceStatus();
@@ -1419,6 +1439,36 @@ export default function App() {
     timerDirty.current = false;
   });
   const diskCopyState = useDiskCopyState();
+  // Desktop widgets: their buttons call the same handlers as the task rows.
+  useWidgetBridge({
+    settings,
+    backlog,
+    projects,
+    workdays,
+    logs,
+    problems: [
+      ...(saveStatus.notSaved ? ['Some changes are not saved yet'] : []),
+      ...(diskCopyState.kind === 'failing' ? ['The copy of your data on this computer is not updating'] : []),
+    ],
+    loaded: dataLoaded,
+    onCommand: (c) => {
+      if (c.type === 'start' || c.type === 'resume') handleUpdateTaskStage(c.id, 'in_progress');
+      else if (c.type === 'pause') handlePauseTask(c.id);
+      else if (c.type === 'close') {
+        const w = settingsRef.current.widgets;
+        updateSettings({ widgets: { ...w, [c.kind]: { ...w?.[c.kind], on: false } } });
+      } else if (c.type === 'set-widget') {
+        const w = settingsRef.current.widgets;
+        updateSettings({ widgets: { ...w, [c.kind]: { top: true, ...w?.[c.kind], on: c.on } } });
+      } else if (c.type === 'clock-in') handleClockIn();
+      else if (c.type === 'end-day') setEndDay({});
+      else if (c.type === 'add-task') {
+        const t = parseWidgetTask(c.text, liveProjects);
+        const pid = t?.projectId ?? defaultProject(liveProjects)?.id;
+        if (t && pid) handleAddBacklogTask(t.title, pid);
+      }
+    },
+  });
   // "Alive now" every 30 s: after a shutdown it says when the PC was last in use (the automatic day uses it later).
   const lastAlive = useHeartbeat(dataLoaded);
   useDayClose({
@@ -1430,6 +1480,37 @@ export default function App() {
     settings,
     addAutoLogs: handleAddAutoLogs,
   });
+  // Saved standups: written once for each closed day (after the day-close job, or 30 minutes after the clock-out), and on a
+  // Thursday also for the week Friday to Thursday. Saved whenever they change.
+  const { ensureStandup, ensureWeekStandup } = useStandups({ enabled: dataLoaded && settings.autoDayEnabled !== false, logs, backlog, settings, workdays, standups, setStandups });
+  useEffect(() => {
+    if (!dataLoaded) return;
+    saveStandups(standups);
+  }, [standups, dataLoaded]);
+  useEffect(() => {
+    if (!dataLoaded || settings.autoDayEnabled === false) return;
+    const run = () => {
+      const journal = readJournal(localStorage);
+      const now = Date.now();
+      const oldest = localDateStr(new Date(now - 7 * 24 * 3600 * 1000));
+      for (const [date, w] of Object.entries(workdays)) {
+        if (!w.clockOut || date < oldest) continue;
+        const settled = !!journal[date] || now - Date.parse(w.clockOut) > 30 * 60_000;
+        if (!settled) continue;
+        void ensureStandup(date);
+        if (new Date(`${date}T12:00:00`).getDay() === 4) void ensureWeekStandup(date);
+      }
+    };
+    const first = setTimeout(run, 20_000);
+    const id = setInterval(run, 120_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataLoaded, workdays, settings.autoDayEnabled]);
+  // The closed day goes to the Sheet and its standup is mailed about 30 minutes later (script version 6).
+  useDelivery({ enabled: dataLoaded && settings.autoDayEnabled !== false, settings, workdays, logs, standups });
   const autoDay = useAutoDay({
     enabled: dataLoaded && settings.autoDayEnabled !== false,
     workdays,
@@ -1762,6 +1843,10 @@ export default function App() {
             logs={logs}
             projects={liveProjects}
             workdays={workdays}
+            backlog={backlog}
+            selectedDay={historyDay}
+            onSelectDay={setHistoryDay}
+            standupFor={(date) => standups.find((s) => s.id === `day:${date}`)?.text}
             hours={hours}
             onEditLog={h.editLog}
             onDeleteLog={h.deleteLog}
@@ -1782,6 +1867,24 @@ export default function App() {
 
         {activeTab === 'settings' && (
           <SettingsView
+            systemInput={{
+              now: Date.now(),
+              engine: saveStatus,
+              disk: diskCopyState,
+              health: health.entries(),
+              repairs: parseRepairs(safeGet('workpulse_repairs')),
+              journal: readJournal(localStorage),
+              storageBytes: storageUsageBytes(localStorage),
+              sheetConfigured: !!settings.googleScriptUrl,
+              phoneConfigured: !!settings.phoneToken,
+              autoDayEnabled: settings.autoDayEnabled !== false,
+              desktop: !!desktopBridge(),
+            }}
+            onSystemAction={(a) => {
+              if (a === 'retry') getEngine().retry();
+              else if (a === 'download-backup') handleBackupNow();
+              else setActiveTab('settings');
+            }}
             settings={settings}
             onSaveSettings={handleSaveSettings}
             onSyncAllLogs={handleSyncAllLogs}

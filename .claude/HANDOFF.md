@@ -1,3 +1,18 @@
+# Handoff — 2026-11-17 · branch `main`
+
+## Done
+- Stages 0 to 6 built (see the plan file). Latest round: standups (`utils/standup.ts`, `hooks/useStandups.ts`, key `workpulse_standups`, in backups), Apps Script v6 (locks, `saveHistory`/`sendDayEmail`/`emailStatus`/`cancelDayEmail`, `phoneAddLog`, Origin column), delivery (`hooks/useDelivery.ts`, `utils/jobs/delivery.ts`: day history to the Sheet + standup email 30 min later, needs `emailEnabled` and v6), History day panel + date jump + export, widgets (clock-in, end day, quick add, Not updating marker, tray checkboxes), System status screen, docs (`CLAUDE.md`, `docs/system-status.md`), sync stamp = request start.
+- Verified: lint clean, 1027 unit tests, smoke 51/51 (history check updated to the new day panel).
+
+## Pending (not done, not tested)
+- NOT TESTED for real: the v6 script on Google (re-paste + New version needed), a real standup email, the packaged installer (`desktop:pack`), widgets and tray in a running Electron, renderer crash recovery, flush on quit.
+- Stage 2 leftovers: server as a restartable utility process, crash-loop safe mode, hung-instance takeover.
+- Phone-added logs (`phoneAddLog`) stay in the Sheet; nothing pulls them into the desktop. `origin` is not sent in snapshots.
+- Settings UI for `autoDayEnabled`, `activityAutoProjects`, watch folder and ignored folders; merge-projects; Undo for auto clock-in/out.
+- Only the `app` and `email` health entries report; other subsystems read as working until they call `reportOk/reportFail`.
+- Smoke has no checks for System status, delivery or the widget commands.
+
+## Old notes
 # Handoff — 2026-11-16 · branch `main`
 
 ## Done

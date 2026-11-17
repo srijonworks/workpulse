@@ -1,6 +1,6 @@
 import { BackupData, AppSettings } from '../types';
 import { DEFAULT_SETTINGS } from '../data/seedData';
-import { CURRENT_SCHEMA_VERSION, isLogArray, isBacklogArray, isProjectArray, isStringArray, isSettingsObject } from './storage';
+import { CURRENT_SCHEMA_VERSION, isStandupArray, isLogArray, isBacklogArray, isProjectArray, isStringArray, isSettingsObject } from './storage';
 import { isWorkdays, validWorkdayHours } from './workday';
 
 // JSON backup text. The Gemini API key is never written to a backup file (S4), and neither is
@@ -46,6 +46,7 @@ export function buildBackup(d: BackupData, indent = 2): string {
       tags: d.tags,
       settings: backupSettings(d.settings),
       workdays: d.workdays ?? {},
+      standups: d.standups ?? [],
     },
     null,
     indent,
@@ -87,6 +88,9 @@ export function parseBackup(text: string): ParseBackupResult {
   if (o.workdays !== undefined && !isWorkdays(o.workdays)) {
     return { ok: false, error: 'Backup has invalid "workdays".' };
   }
+  if (o.standups !== undefined && !isStandupArray(o.standups)) {
+    return { ok: false, error: 'Backup has invalid "standups".' };
+  }
   const settings: AppSettings = {
     ...DEFAULT_SETTINGS,
     ...((o.settings as object) || {}),
@@ -104,7 +108,7 @@ export function parseBackup(text: string): ParseBackupResult {
   settings.workdayHours = validWorkdayHours(settings.workdayHours);
   return {
     ok: true,
-    data: { logs: o.logs, backlog: o.backlog, projects: o.projects, tags: o.tags, settings, workdays: o.workdays },
+    data: { logs: o.logs, backlog: o.backlog, projects: o.projects, tags: o.tags, settings, workdays: o.workdays, standups: o.standups },
   };
 }
 

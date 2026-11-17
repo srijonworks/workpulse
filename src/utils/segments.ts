@@ -52,6 +52,25 @@ export function splitSegmentsAtGap(
   return changed ? out : tasks;
 }
 
+/**
+ * Seconds the tasks' timers ran inside [fromMs, toMs): each segment is clipped to the range, an open
+ * segment runs to `nowMs`. Overlapping segments (two timers at once) both count, like the task clocks do.
+ */
+export function segmentSecondsInRange(tasks: BacklogTask[], fromMs: number, toMs: number, nowMs: number): number {
+  let ms = 0;
+  for (const t of tasks) {
+    for (const s of t.segments ?? []) {
+      const a = Date.parse(s.start);
+      const b = s.end ? Date.parse(s.end) : nowMs;
+      if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+      const lo = Math.max(a, fromMs);
+      const hi = Math.min(b, toMs);
+      if (hi > lo) ms += hi - lo;
+    }
+  }
+  return Math.floor(ms / 1000);
+}
+
 export type Ball =
   | { kind: 'empty' }
   | { kind: 'now' }

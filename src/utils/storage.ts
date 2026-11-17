@@ -1,4 +1,4 @@
-import { WorkLog, BacklogTask, Project, AppSettings, BackupData, Workdays } from '../types';
+import { WorkLog, BacklogTask, Project, AppSettings, BackupData, Workdays, StandupRecord } from '../types';
 import { localDateStr } from './dates';
 import { moveRunningToDay } from './taskDates';
 import { isWorkdays, validWorkdayHours } from './workday';
@@ -14,6 +14,7 @@ const KEYS = {
   TAGS: 'workpulse_tags',
   SETTINGS: 'workpulse_settings',
   WORKDAYS: 'workpulse_workdays',
+  STANDUPS: 'workpulse_standups',
   SCHEMA_VERSION: 'workpulse_schema_version',
 };
 
@@ -27,6 +28,7 @@ export const KEY_LABELS: Record<string, string> = {
   [KEYS.TAGS]: 'tags',
   [KEYS.SETTINGS]: 'settings',
   [KEYS.WORKDAYS]: 'office clock records',
+  [KEYS.STANDUPS]: 'saved standups',
 };
 
 // A failed save keeps the value and is retried (see ./persist/engine); `kind` says why in the cases it knows.
@@ -59,6 +61,7 @@ const isObjectArray = (v: unknown): boolean =>
 export const isLogArray = (v: unknown): v is WorkLog[] => isObjectArray(v);
 export const isBacklogArray = (v: unknown): v is BacklogTask[] => isObjectArray(v);
 export const isProjectArray = (v: unknown): v is Project[] => isObjectArray(v);
+export const isStandupArray = (v: unknown): v is StandupRecord[] => isObjectArray(v);
 export const isStringArray = (v: unknown): v is string[] =>
   Array.isArray(v) && v.every((i) => typeof i === 'string');
 export const isSettingsObject = (v: unknown): v is Partial<AppSettings> => isObj(v);
@@ -174,6 +177,7 @@ export function loadStoredData() {
     workdayHours: validWorkdayHours(merged.workdayHours),
   };
   const workdays = readKey<Workdays>(KEYS.WORKDAYS, isWorkdays, {}, {}, warnings, known);
+  const standups = readKey<StandupRecord[]>(KEYS.STANDUPS, isStandupArray, [], [], warnings, known);
 
   // Normalise tasks (pending ones keep their own day). A timer left running across midnight while the
   // app was closed belongs to today: it moves here, since the live midnight check never saw the change.
@@ -193,7 +197,7 @@ export function loadStoredData() {
     console.error('Failed to write storage metadata:', e);
   }
 
-  return { logs, backlog, projects, tags, settings, workdays, warnings };
+  return { logs, backlog, projects, tags, settings, workdays, standups, warnings };
 }
 
 // Every save goes through the engine: a failure keeps the value and it is retried, and the result says why.
@@ -205,9 +209,10 @@ export const saveProjects = (projects: Project[]) => saveKey(KEYS.PROJECTS, proj
 export const saveTags = (tags: string[]) => saveKey(KEYS.TAGS, tags);
 export const saveSettings = (settings: AppSettings) => saveKey(KEYS.SETTINGS, settings);
 export const saveWorkdays = (workdays: Workdays) => saveKey(KEYS.WORKDAYS, workdays);
+export const saveStandups = (standups: StandupRecord[]) => saveKey(KEYS.STANDUPS, standups);
 
-// Replaces all data keys at once (backup import). Workdays are written only when the backup has
-// them; an older backup leaves the stored workdays alone. If any write fails, every key is
+// Replaces all data keys at once (backup import). Workdays and standups are written only when the backup has
+// them; an older backup leaves the stored ones alone. If any write fails, every key is
 // restored to its previous value so a failed import cannot leave a half-written state, and nothing
 // is kept for later (the caller tells the user the import failed). An import is the user's own
 // decision to replace everything, so keys that were blocked as unreadable are let go first, and
@@ -221,6 +226,7 @@ export function replaceAllData(d: BackupData): SaveResult {
     [KEYS.SETTINGS, d.settings],
   ];
   if (d.workdays !== undefined) entries.push([KEYS.WORKDAYS, d.workdays]);
+  if (d.standups !== undefined) entries.push([KEYS.STANDUPS, d.standups]);
   const wasBlocked = entries.map(([k]) => k).filter((k) => engine.status().blockedKeys.includes(k));
   for (const k of wasBlocked) engine.unblock(k, { discardPending: true });
   const result = engine.trySave(entries);

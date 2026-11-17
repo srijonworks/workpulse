@@ -12,6 +12,12 @@ import {
   saveBackupToSheet,
   getBackupInfo,
   loadBackupFromSheet,
+  saveHistory,
+  sendDayEmail,
+  getEmailStatus,
+  cancelDayEmail,
+  dayEmailKey,
+  HISTORY_SCRIPT_VERSION,
 } from './phoneApi';
 import type { PhoneSnapshot } from './phoneSync';
 
@@ -268,5 +274,47 @@ describe('phoneApi: sheet backup', () => {
     const r = await saveBackupToSheet(URL_, 't', 'x', meta);
     expect(r.ok).toBe(false);
     expect(r.message).not.toContain('Failed to fetch');
+  });
+});
+
+describe('phoneApi: history and standup emails (script version 6)', () => {
+  const day = { kind: 'day', date: '2026-11-11' } as const;
+
+  it('saveHistory posts the token in the body with the right action and checks the answer', async () => {
+    const f = stubFetch(() => reply({ status: 'ok', days: 1, standups: 0 }));
+    const r = await saveHistory(URL_, 'tok123', { days: [{ date: '2026-11-11', workedMinutes: 480, loggedMinutes: 400, logCount: 3 }] });
+    expect(r).toMatchObject({ ok: true, data: { days: 1, standups: 0 } });
+    expect(sentBody(f)).toMatchObject({ action: 'saveHistory', payload: { action: 'saveHistory', token: 'tok123', standups: [] } });
+    expect(String(f.mock.calls[0][0])).not.toContain('tok123');
+  });
+
+  it('a script older than version 6 answers any action with ok; that is reported as an old script', async () => {
+    stubFetch(() => reply({ status: 'ok', message: 'Action completed' }));
+    expect(await saveHistory(URL_, 't', {})).toMatchObject({ ok: false, code: 'script_old' });
+    expect(await sendDayEmail(URL_, 't', day)).toMatchObject({ ok: false, code: 'script_old' });
+    expect(await getEmailStatus(URL_, 't')).toMatchObject({ ok: false, code: 'script_old' });
+    expect(await cancelDayEmail(URL_, 't', day)).toMatchObject({ ok: false, code: 'script_old' });
+    expect(HISTORY_SCRIPT_VERSION).toBe(6);
+  });
+
+  it('sendDayEmail sends the target, delay and request id; a failure keeps the script sentence', async () => {
+    const f = stubFetch(() => reply({ status: 'ok', state: 'pending', key: 'week|2026-11-09|2026-11-15' }));
+    const r = await sendDayEmail(URL_, 'tok', { kind: 'week', from: '2026-11-09', to: '2026-11-15' }, { delayMinutes: 20, requestId: 'r1' });
+    expect(r.data?.state).toBe('pending');
+    expect(sentBody(f).payload).toEqual({ action: 'sendDayEmail', token: 'tok', kind: 'week', from: '2026-11-09', to: '2026-11-15', delayMinutes: 20, requestId: 'r1' });
+    stubFetch(() => reply({ status: 'error', code: 'mail_failed', message: 'Google has reached its daily limit.' }));
+    expect(await sendDayEmail(URL_, 'tok', day)).toEqual({ ok: false, code: 'mail_failed', message: 'Google has reached its daily limit.' });
+  });
+
+  it('getEmailStatus sends keys and drops odd rows; cancel returns the flag; busy is retryable', async () => {
+    const f = stubFetch(() => reply({ status: 'ok', items: [{ key: 'k', state: 'sent', tries: 1 }, { nope: 1 }, null] }));
+    const r = await getEmailStatus(URL_, 'tok', [day]);
+    expect(r.data?.items).toEqual([{ key: 'k', state: 'sent', tries: 1 }]);
+    expect(sentBody(f).payload.keys).toEqual([dayEmailKey(day)]);
+    expect(dayEmailKey(day)).toBe('day|2026-11-11|2026-11-11');
+    stubFetch(() => reply({ status: 'ok', cancelled: true }));
+    expect((await cancelDayEmail(URL_, 'tok', day)).data?.cancelled).toBe(true);
+    stubFetch(() => reply({ status: 'error', code: 'busy', message: 'The Sheet is busy with another update.' }));
+    expect(await cancelDayEmail(URL_, 'tok', day)).toMatchObject({ ok: false, code: 'busy', retryable: true });
   });
 });

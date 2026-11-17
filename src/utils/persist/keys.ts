@@ -7,6 +7,7 @@ export const DATA_KEYS = [
   'workpulse_tags',
   'workpulse_settings',
   'workpulse_workdays',
+  'workpulse_standups',
 ] as const;
 
 export type DataKey = (typeof DATA_KEYS)[number];

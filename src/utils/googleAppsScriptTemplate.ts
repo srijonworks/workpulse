@@ -5,7 +5,7 @@ import { SCRIPT_BACKUP } from './appsScript/backup';
 
 const HEADER = `/**
  * =========================================================================
- * WorkPulse - Google Sheets Sync Backend (version 3)
+ * WorkPulse - Google Sheets Sync Backend (version 6)
  * =========================================================================
  *
  * INSTRUCTIONS TO DEPLOY (first time):
@@ -27,101 +27,78 @@ const HEADER = `/**
  *    existing deployment, set "Version" to "New version" and click "Deploy".
  *    Do NOT use "New deployment": it makes a new URL and breaks the link saved in WorkPulse.
  * 3. Google asks for permissions again. This version can also send you an evening
- *    email (to your own address) and run a daily timer for it; allow both.
+ *    email and standup emails (to your own address) and run timers for them; allow all.
  * 4. In WorkPulse Settings, set the phone PIN.
  */
 `;
 
-// The log sync code of version 2, unchanged: appendLog / batchSync into the 12-column WorkPulse_Logs tab
-// with the Id upsert. doPost (in SCRIPT_CORE) hands every action it does not know to handleLogAction_.
+// The log sync code: appendLog / batchSync into the WorkPulse_Logs tab (12 columns of version 2, then Origin) with the Id upsert,
+// under the script lock. doPost (in SCRIPT_CORE) hands every action it does not know to handleLogAction_.
 const LOGS_SCRIPT = `
+// One log as a sheet row: 12 fixed columns (the 12th is the Id) and the 13th, Origin ('auto' for a log WorkPulse wrote itself, else empty).
+function logRow_(l) {
+  return [
+    l.createdAt || new Date().toISOString(),
+    l.date || '',
+    l.time || '',
+    l.projectName || '',
+    l.description || '',
+    l.status || 'completed',
+    (l.tags || []).join(', '),
+    l.linkUrl || '',
+    l.durationMinutes || 0,
+    l.energyRating || 0,
+    l.imageBase64 ? 'Yes (Image Attached)' : 'None',
+    l.id || '',
+    l.origin === 'auto' ? 'auto' : ''
+  ];
+}
+
+// Log writes run under the script lock. When another run holds it for 20 s, nothing is written and the answer is
+// the busy code, so the desktop sends the same request again later (the Id upsert makes that safe).
 function handleLogAction_(action, contents) {
-  var sheet = getOrCreateLogsSheet();
-
-  if (action === 'appendLog') {
-    var log = contents.log;
-    if (!log) {
-      throw new Error('No log payload provided');
-    }
-
-    upsertRows(sheet, [[
-      log.createdAt || new Date().toISOString(),
-      log.date || '',
-      log.time || '',
-      log.projectName || '',
-      log.description || '',
-      log.status || 'completed',
-      (log.tags || []).join(', '),
-      log.linkUrl || '',
-      log.durationMinutes || 0,
-      log.energyRating || 0,
-      log.imageBase64 ? 'Yes (Image Attached)' : 'None',
-      log.id || ''
-    ]]);
-
-    return ContentService.createTextOutput(JSON.stringify({
-      status: 'ok',
-      message: 'Log successfully saved to Google Sheet',
-      id: log.id
-    })).setMimeType(ContentService.MimeType.JSON);
+  if (action !== 'appendLog' && action !== 'batchSync') {
+    return jsonOut_({ status: 'ok', message: 'Action completed' });
   }
-
-  if (action === 'batchSync') {
+  if (action === 'appendLog' && !contents.log) {
+    throw new Error('No log payload provided');
+  }
+  var res = tryLocked_(function () {
+    var sheet = getOrCreateLogsSheet();
+    if (action === 'appendLog') {
+      upsertRows(sheet, [logRow_(contents.log)]);
+      return { status: 'ok', message: 'Log successfully saved to Google Sheet', id: contents.log.id };
+    }
     var logs = contents.logs || [];
     var rows = [];
-
-    for (var i = 0; i < logs.length; i++) {
-      var l = logs[i];
-      rows.push([
-        l.createdAt || new Date().toISOString(),
-        l.date || '',
-        l.time || '',
-        l.projectName || '',
-        l.description || '',
-        l.status || 'completed',
-        (l.tags || []).join(', '),
-        l.linkUrl || '',
-        l.durationMinutes || 0,
-        l.energyRating || 0,
-        l.imageBase64 ? 'Yes (Image Attached)' : 'None',
-        l.id || ''
-      ]);
-    }
-
+    for (var i = 0; i < logs.length; i++) rows.push(logRow_(logs[i]));
     upsertRows(sheet, rows);
-
-    return ContentService.createTextOutput(JSON.stringify({
-      status: 'ok',
-      syncedCount: rows.length
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-
-  return ContentService.createTextOutput(JSON.stringify({
-    status: 'ok',
-    message: 'Action completed'
-  })).setMimeType(ContentService.MimeType.JSON);
+    return { status: 'ok', syncedCount: rows.length };
+  });
+  return jsonOut_(res.got ? res.value : busyAnswer_());
 }
 
 function getOrCreateLogsSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName('WorkPulse_Logs');
+  var headers = [
+    'Timestamp',
+    'Date',
+    'Time',
+    'Project',
+    'Description',
+    'Status',
+    'Tags',
+    'Link',
+    'Duration_Minutes',
+    'Energy_Rating',
+    'Proof_Attached',
+    'Id',
+    'Origin'
+  ];
 
   if (!sheet) {
     sheet = ss.insertSheet('WorkPulse_Logs');
-    var headers = [
-      'Timestamp',
-      'Date',
-      'Time',
-      'Project',
-      'Description',
-      'Status',
-      'Tags',
-      'Link',
-      'Duration_Minutes',
-      'Energy_Rating',
-      'Proof_Attached',
-      'Id'
-    ];
     sheet.appendRow(headers);
     var headerRange = sheet.getRange(1, 1, 1, headers.length);
     headerRange.setFontWeight('bold');
@@ -130,43 +107,53 @@ function getOrCreateLogsSheet() {
     sheet.autoResizeColumns(1, headers.length);
   }
 
-  // Older sheets: make sure the Id column (12th) exists and has its header.
-  if (sheet.getMaxColumns() < ID_COL) {
-    sheet.insertColumnsAfter(sheet.getMaxColumns(), ID_COL - sheet.getMaxColumns());
+  // Older sheets: make sure the Id (12th) and Origin (13th) columns exist and have their headers. Nothing else moves.
+  if (sheet.getMaxColumns() < headers.length) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), headers.length - sheet.getMaxColumns());
   }
-  if (!sheet.getRange(1, ID_COL).getValue()) {
-    sheet.getRange(1, ID_COL).setValue('Id').setFontWeight('bold').setBackground('#F3F4F6');
+  for (var c = ID_COL; c <= headers.length; c++) {
+    if (!sheet.getRange(1, c).getValue()) {
+      sheet.getRange(1, c).setValue(headers[c - 1]).setFontWeight('bold').setBackground('#F3F4F6');
+    }
   }
 
   return sheet;
 }
 
 // Column 12 holds the WorkPulse log id. Rows are updated in place when the id already exists,
-// so sending the same log twice never creates a duplicate row.
+// so sending the same log twice never creates a duplicate row. Runs under the script lock (reused when
+// the caller already holds it).
 var ID_COL = 12;
 
 function upsertRows(sheet, rows) {
   if (rows.length === 0) return;
-  var index = {};
-  var last = sheet.getLastRow();
-  if (last >= 2) {
-    var ids = sheet.getRange(2, ID_COL, last - 1, 1).getValues();
-    for (var i = 0; i < ids.length; i++) {
-      if (ids[i][0]) index[ids[i][0]] = i + 2;
+  var res = tryLocked_(function () {
+    var index = {};
+    var last = sheet.getLastRow();
+    if (last >= 2) {
+      var ids = sheet.getRange(2, ID_COL, last - 1, 1).getValues();
+      for (var i = 0; i < ids.length; i++) {
+        if (ids[i][0]) index[ids[i][0]] = i + 2;
+      }
     }
-  }
-  var fresh = [];
-  for (var r = 0; r < rows.length; r++) {
-    var id = rows[r][ID_COL - 1];
-    if (id && index[id]) {
-      sheet.getRange(index[id], 1, 1, rows[r].length).setValues([rows[r]]);
-    } else {
-      fresh.push(rows[r]);
+    var fresh = [];
+    var freshAt = {};
+    for (var r = 0; r < rows.length; r++) {
+      var id = rows[r][ID_COL - 1];
+      if (id && index[id]) {
+        sheet.getRange(index[id], 1, 1, rows[r].length).setValues([rows[r]]);
+      } else if (id && freshAt[id] !== undefined) {
+        fresh[freshAt[id]] = rows[r];
+      } else {
+        if (id) freshAt[id] = fresh.length;
+        fresh.push(rows[r]);
+      }
     }
-  }
-  if (fresh.length > 0) {
-    sheet.getRange(sheet.getLastRow() + 1, 1, fresh.length, fresh[0].length).setValues(fresh);
-  }
+    if (fresh.length > 0) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, fresh.length, fresh[0].length).setValues(fresh);
+    }
+  });
+  if (!res.got) throw new Error('The Sheet is busy: the script lock was not free within 20 seconds.');
 }
 `;
 

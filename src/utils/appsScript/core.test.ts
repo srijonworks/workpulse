@@ -36,11 +36,11 @@ const snapshot = (over: Record<string, unknown> = {}) => ({
 });
 
 describe('script v3: existing behaviour', () => {
-  it('ping reports version 4 on GET and POST', () => {
+  it('ping reports version 6 on GET and POST', () => {
     const h = createScriptHarness();
-    expect(h.get({ action: 'ping' })).toMatchObject({ status: 'ok', version: 5 });
-    expect(h.get({})).toMatchObject({ status: 'ok', version: 5 });
-    expect(h.call('ping')).toMatchObject({ status: 'ok', version: 5 });
+    expect(h.get({ action: 'ping' })).toMatchObject({ status: 'ok', version: 6 });
+    expect(h.get({})).toMatchObject({ status: 'ok', version: 6 });
+    expect(h.call('ping')).toMatchObject({ status: 'ok', version: 6 });
   });
 
   it('appendLog still upserts by Id into the 12 log columns', () => {
@@ -49,7 +49,7 @@ describe('script v3: existing behaviour', () => {
     expect(h.call('appendLog', { log })).toMatchObject({ status: 'ok', id: log.id });
     expect(h.call('appendLog', { log: { ...log, description: 'Edited' } }).status).toBe('ok');
     const rows = h.sheets.WorkPulse_Logs;
-    expect(rows[0]).toEqual(['Timestamp', 'Date', 'Time', 'Project', 'Description', 'Status', 'Tags', 'Link', 'Duration_Minutes', 'Energy_Rating', 'Proof_Attached', 'Id']);
+    expect(rows[0]).toEqual(['Timestamp', 'Date', 'Time', 'Project', 'Description', 'Status', 'Tags', 'Link', 'Duration_Minutes', 'Energy_Rating', 'Proof_Attached', 'Id', 'Origin']);
     expect(h.run('getOrCreateLogsSheet').getLastRow()).toBe(2);
     expect(rows[1][4]).toBe('Edited');
     expect(rows[1][6]).toBe('a, b');
@@ -203,7 +203,7 @@ describe('script v3: pushState', () => {
 
     expect(h.sheets.WorkPulse_Tasks[0]).toEqual(['Id', 'Title', 'Project', 'ProjectId', 'DueDate', 'Stage', 'TrackedMinutes', 'CompletedAt', 'FromPhone']);
     expect(h.sheets.WorkPulse_Days[0]).toEqual(['Date', 'ClockIn', 'ClockOut']);
-    expect(h.sheets.WorkPulse_Recent[0]).toEqual(['Id', 'Date', 'Time', 'Project', 'ProjectId', 'Description', 'Status', 'Minutes', 'SubTasks']);
+    expect(h.sheets.WorkPulse_Recent[0]).toEqual(['Id', 'Date', 'Time', 'Project', 'ProjectId', 'Description', 'Status', 'Minutes', 'SubTasks', 'Origin']);
     expect(h.sheets.WorkPulse_Projects[0]).toEqual(['Id', 'Name', 'Color']);
     expect(h.sheets.WorkPulse_Tasks).toHaveLength(4);
     // date columns stay plain text, not Date objects
@@ -454,7 +454,8 @@ describe('script v3: locking', () => {
     });
     const r = h.call('pushState', { token, ...snapshot() });
     expect(r.status).toBe('error');
-    expect(r.message).toContain('Service Spreadsheets failed');
+    expect(r.message).not.toContain('Service Spreadsheets');
+    expect(r.detail).toContain('Service Spreadsheets failed');
     expect(h.props.meta).toBeUndefined();
     expect(h.lockHeld).toBe(false);
   });
@@ -466,7 +467,7 @@ describe('script v3: exposure and style', () => {
     const exposed = names.filter((n) => !n.endsWith('_')).sort();
     expect(exposed).toEqual([
       'authorizeWorkPulse', 'buildEveningEmail', 'checkPin', 'checkToken', 'doGet', 'doPost', 'getOrCreateLogsSheet', 'hashSecret',
-      'phoneAddTask', 'phoneData', 'phoneOlderLogs', 'sendEveningEmail', 'servePhonePage', 'upsertRows', 'withLock',
+      'phoneAddLog', 'phoneAddTask', 'phoneData', 'phoneOlderLogs', 'sendEveningEmail', 'servePhonePage', 'upsertRows', 'withLock',
     ]);
   });
 

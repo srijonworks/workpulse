@@ -1,7 +1,8 @@
-import type { BacklogTask, Project, ThemeId, WidgetsSettings, Workdays } from '../types';
+import type { BacklogTask, Project, ThemeId, WidgetsSettings, WorkLog, Workdays } from '../types';
 import { getTaskStage } from '../components/tasks/helpers';
 import { currentWorkday, DEFAULT_WORKDAY_HOURS, validWorkdayHours } from './workday';
 import { isPendingTask } from './taskLogging';
+import { splitProjectTag } from './projects';
 import { isRunningTask, liveSecondsOf } from './timerStore';
 
 // What the desktop widgets show. The app builds this and sends it to the widget windows (Electron only);
@@ -42,16 +43,38 @@ export interface WidgetSnapshot {
   hours: number;
   clockIn: string | null;
   clockOut: string | null;
+  /** The local date the snapshot was made for. */
+  date: string;
+  /** Minutes logged today (all logs dated `date`). */
+  loggedMinutes: number;
+  /** Plain sentences about things that need attention (a failed backup, a day with no clock-out). Empty = fine. */
+  problems: string[];
   tasks: WidgetTask[];
 }
 
 export type WidgetCommand =
   | { type: 'start' | 'pause' | 'resume'; id: string }
+  | { type: 'clock-in' }
+  | { type: 'end-day' }
+  | { type: 'add-task'; text: string }
+  | { type: 'set-widget'; kind: WidgetKind; on: boolean }
   | { type: 'open' }
   | { type: 'close'; kind: WidgetKind };
 
 const RANK: Record<WidgetTaskState, number> = { running: 0, paused: 1, blocked: 2, planned: 3 };
 const MAX_TASKS = 30;
+const MAX_PROBLEMS = 3;
+
+/** The main window re-sends at least every 30 s; a snapshot older than this means it stopped. */
+export const STALE_AFTER_MS = 90_000;
+export const isSnapshotStale = (s: WidgetSnapshot, nowMs: number): boolean => nowMs - s.at > STALE_AFTER_MS;
+
+/** A line typed in the Tasks widget: a trailing "#project" picks the project (like Today's quick add). */
+export function parseWidgetTask(text: string, projects: Project[]): { title: string; projectId?: string } | null {
+  const { text: title, project } = splitProjectTag(text.trim().slice(0, 300), projects);
+  if (!title) return null;
+  return project ? { title, projectId: project.id } : { title };
+}
 
 /** Open work: running, paused and blocked tasks of any date, and planned tasks due today or earlier. */
 export function buildWidgetSnapshot(input: {
@@ -62,6 +85,8 @@ export function buildWidgetSnapshot(input: {
   workdayHours: number | undefined;
   today: string;
   nowMs: number;
+  logs?: WorkLog[];
+  problems?: string[];
 }): WidgetSnapshot {
   const { backlog, projects, workdays, today } = input;
   const byId = new Map(projects.map((p) => [p.id, p]));
@@ -95,6 +120,9 @@ export function buildWidgetSnapshot(input: {
     hours: validWorkdayHours(input.workdayHours) ?? DEFAULT_WORKDAY_HOURS,
     clockIn: day?.rec.clockIn ?? null,
     clockOut: day?.rec.clockOut ?? null,
+    date: today,
+    loggedMinutes: (input.logs ?? []).reduce((sum, l) => (l.date === today ? sum + (l.durationMinutes ?? 0) : sum), 0),
+    problems: (input.problems ?? []).slice(0, MAX_PROBLEMS),
     tasks: tasks.slice(0, MAX_TASKS),
   };
 }
@@ -106,6 +134,9 @@ export function snapshotSignature(s: WidgetSnapshot): string {
     s.hours,
     s.clockIn,
     s.clockOut,
+    s.date,
+    s.loggedMinutes,
+    s.problems,
     s.tasks.map((t) => [t.id, t.title, t.project, t.color, t.state, t.state === 'running' ? 0 : t.seconds]),
   ]);
 }

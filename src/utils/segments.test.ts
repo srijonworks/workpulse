@@ -163,3 +163,20 @@ describe('workBuckets', () => {
     expect(b[1]).toBeCloseTo(5 / 15);
   });
 });
+
+import { segmentSecondsInRange } from './segments';
+
+describe('segmentSecondsInRange', () => {
+  const from = Date.parse('2026-11-09T18:00:00.000Z');
+  const to = from + 24 * 3600_000;
+  it('clips a segment to the range and runs an open one to now', () => {
+    const t = task({ segments: [{ start: at('09:00'), end: at('10:00') }, { start: at('11:00') }] });
+    expect(segmentSecondsInRange([t], from, to, ms('11:30'))).toBe(3600 + 1800);
+    expect(segmentSecondsInRange([t], ms('09:30'), ms('09:45'), ms('11:30'))).toBe(900);
+  });
+  it('ignores segments outside the range', () => {
+    const t = task({ segments: [{ start: at('09:00'), end: at('10:00') }] });
+    expect(segmentSecondsInRange([t], ms('12:00'), to, ms('13:00'))).toBe(0);
+    expect(segmentSecondsInRange([task()], from, to, ms('13:00'))).toBe(0);
+  });
+});

@@ -22,6 +22,9 @@ export interface FakeTrigger {
   hour?: number;
   minute?: number;
   tz?: string;
+  // One-off triggers (timeBased().after(ms)): the delay and the instant they are due.
+  afterMs?: number;
+  at?: number;
 }
 
 export interface FakeHtmlOutput {
@@ -45,6 +48,14 @@ export interface ScriptHarness {
   setNow(d: Date): void;
   // true: ScriptApp trigger builders throw on create() (a script without the trigger permission).
   breakTriggers(on: boolean): void;
+  // true: another execution holds the script lock (waitLock throws, tryLock answers false) until set to false.
+  contendLock(on: boolean): void;
+  // A text: every MailApp.sendEmail throws it (null = mail works again).
+  failMail(message: string | null): void;
+  // Emails left for the day; sendEmail throws the daily-limit error at 0 and each mail uses one.
+  setMailQuota(n: number): void;
+  // Runs, as fresh executions, every one-off trigger that is due at the current fake time (they stay listed until the script deletes them).
+  fireDueTriggers(): number;
 }
 
 const DEFAULT_ROWS = 1000;
@@ -118,6 +129,9 @@ export function createScriptHarness(opts: { spreadsheetTz?: string; now?: Date }
   let lockCalls = 0;
   let lockHeld = false;
   let triggersBroken = false;
+  let lockContended = false;
+  let mailError: string | null = null;
+  let mailQuota = 100;
 
   // A value written to a cell, as Sheets stores it.
   function stored(name: string, r: number, c: number, v: unknown): unknown {
@@ -268,6 +282,7 @@ export function createScriptHarness(opts: { spreadsheetTz?: string; now?: Date }
     },
     getSheets: () => Object.keys(sheets).map(addSheet),
     getSpreadsheetTimeZone: () => ssTz,
+    getUrl: () => 'https://docs.google.com/spreadsheets/d/FAKE_ID/edit',
   };
 
   class FakeDate extends Date {
@@ -288,6 +303,7 @@ export function createScriptHarness(opts: { spreadsheetTz?: string; now?: Date }
       atHour: (h: number) => ((t.hour = h), b),
       nearMinute: (m: number) => ((t.minute = m), b),
       inTimezone: (tz: string) => ((t.tz = tz), b),
+      after: (ms: number) => ((t.afterMs = ms), (t.at = nowMs + ms), b),
       create() {
         if (triggersBroken) throw new Error('You do not have permission to call ScriptApp.newTrigger.');
         triggers.push(t);
@@ -324,13 +340,14 @@ export function createScriptHarness(opts: { spreadsheetTz?: string; now?: Date }
         return {
           waitLock(_ms: number) {
             lockCalls++;
+            if (lockContended) throw new Error('Lock timeout: another process was holding the lock for too long.');
             if (lockHeld) throw new Error('Fake lock: waitLock called while the script lock is already held');
             lockHeld = true;
             mine = true;
           },
           tryLock(_ms: number) {
             lockCalls++;
-            if (lockHeld) return false;
+            if (lockContended || lockHeld) return false;
             lockHeld = mine = true;
             return true;
           },
@@ -395,10 +412,13 @@ export function createScriptHarness(opts: { spreadsheetTz?: string; now?: Date }
     },
     MailApp: {
       sendEmail(a: any, subject?: string, body?: string, options?: any) {
+        if (mailError !== null) throw new Error(mailError);
+        if (mailQuota <= 0) throw new Error('Service invoked too many times for one day: email.');
+        mailQuota--;
         const m = typeof a === 'object' ? a : { to: a, subject, body, ...(options || {}) };
         mails.push({ to: m.to, subject: m.subject, htmlBody: m.htmlBody ?? '', body: m.body ?? '' });
       },
-      getRemainingDailyQuota: () => 100,
+      getRemainingDailyQuota: () => mailQuota,
     },
     ScriptApp: {
       getProjectTriggers: () =>
@@ -463,6 +483,20 @@ export function createScriptHarness(opts: { spreadsheetTz?: string; now?: Date }
     },
     breakTriggers(on: boolean) {
       triggersBroken = on;
+    },
+    contendLock(on: boolean) {
+      lockContended = on;
+    },
+    failMail(message: string | null) {
+      mailError = message;
+    },
+    setMailQuota(n: number) {
+      mailQuota = n;
+    },
+    fireDueTriggers() {
+      const due = triggers.filter((t) => t.at !== undefined && t.at <= nowMs);
+      for (const t of due) lookup(t.fn)();
+      return due.length;
     },
   };
 }

@@ -1,6 +1,6 @@
 // The phone page of the WorkPulse Apps Script: one self-contained HTML file (no external scripts, styles or
 // fonts) served by doGet?page=phone. It talks to the script only through google.script.run: phoneData,
-// phoneAddTask and phoneOlderLogs, each checked with the PIN (see core.ts).
+// phoneAddTask, phoneAddLog and phoneOlderLogs, each checked with the PIN (see core.ts).
 //
 // Rules for this file:
 // - The page script is plain ES5 (var, function; no let/const, arrow functions or template literals),
@@ -122,6 +122,7 @@ button { background: none; border: 0; cursor: pointer; }
 .go { width: 100%; min-height: 52px; border-radius: 6px; background: var(--gold); color: var(--on-gold); font-weight: 700; font-size: 15px; }
 .go:disabled { background: var(--subtle); color: var(--mute); cursor: default; }
 .addmsg { margin-top: 12px; }
+.subhead { font-size: 15px; font-weight: 700; margin: 28px 0 12px; padding-top: 18px; border-top: 1px solid var(--line); }
 .help { margin-top: 18px; }
 
 /* PIN. */
@@ -233,6 +234,37 @@ button { background: none; border: 0; cursor: pointer; }
           <p class="msg addmsg" id="addMsg" role="status"></p>
         </form>
         <p class="small help">It shows under Tasks right away and moves to your PC the next time WorkPulse is open there.</p>
+        <h2 class="subhead">Log work done outside the office</h2>
+        <form id="logForm" novalidate>
+          <div class="field">
+            <label for="logText">What you did</label>
+            <input class="inp" id="logText" name="text" type="text" maxlength="500" autocomplete="off" enterkeyhint="done" placeholder="Fixed the pump at the site">
+          </div>
+          <div class="field">
+            <label for="logProject">Project</label>
+            <div class="sel">
+              <select class="inp" id="logProject" name="logProject"></select>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#1d2b24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 6l4.5 4.5L12.5 6"/></svg>
+            </div>
+          </div>
+          <div class="field">
+            <label for="logTime">Started at</label>
+            <input class="inp" id="logTime" name="time" type="time" value="09:00">
+          </div>
+          <div class="field">
+            <label for="logMinutes">Minutes</label>
+            <input class="inp" id="logMinutes" name="minutes" type="number" min="1" max="960" step="1" inputmode="numeric" placeholder="45">
+          </div>
+          <fieldset class="field">
+            <legend>Day</legend>
+            <div class="seg">
+              <label><input type="radio" name="logday" value="today" checked><span>Today</span></label>
+              <label><input type="radio" name="logday" value="yesterday"><span>Yesterday</span></label>
+            </div>
+          </fieldset>
+          <button type="submit" class="go" id="logBtn">Add log</button>
+          <p class="msg addmsg" id="logMsg" role="status"></p>
+        </form>
       </section>
     </div>
     <footer class="foot"><span id="asofText"></span> <span aria-hidden="true">&middot;</span> <button type="button" class="link" id="refreshBtn">Refresh</button></footer>
@@ -250,7 +282,7 @@ button { background: none; border: 0; cursor: pointer; }
 
   var S = {
     gen: 0, pin: '', entry: '', checking: false, lockedUntil: 0, lockTimer: null,
-    data: null, tab: 'tasks', flash: '', adding: false, refreshing: false,
+    data: null, tab: 'tasks', flash: '', adding: false, addingLog: false, refreshing: false,
     older: [], olderNext: '', olderMore: true, olderBusy: false, olderDone: false
   };
 
@@ -800,6 +832,18 @@ button { background: none; border: 0; cursor: pointer; }
       sel.appendChild(o);
     });
     sel.value = keep && d.byId[keep] ? keep : '';
+    var lsel = $('logProject');
+    var lkeep = lsel.value || keep;
+    clear(lsel);
+    var lnone = el('option', null, 'No project');
+    lnone.value = '';
+    lsel.appendChild(lnone);
+    d.projects.forEach(function (p) {
+      var o = el('option', null, str(p.name) || 'Unnamed project');
+      o.value = str(p.id);
+      lsel.appendChild(o);
+    });
+    lsel.value = lkeep && d.byId[lkeep] ? lkeep : '';
   }
 
   function renderAsof() {
@@ -877,6 +921,46 @@ button { background: none; border: 0; cursor: pointer; }
     if (call) call.phoneAddTask(S.pin, { title: title, projectId: projectId, day: day });
   }
 
+  // ---- Add a log for a day outside the office ----
+  function addLog(ev) {
+    ev.preventDefault();
+    if (S.addingLog || !S.pin) return;
+    var msg = $('logMsg');
+    var text = $('logText').value.replace(/^\s+|\s+$/g, '');
+    var time = $('logTime').value;
+    var minutes = parseInt($('logMinutes').value, 10);
+    if (!text) { setMsg(msg, 'Type what you did first.', 'bad'); $('logText').focus(); return; }
+    if (!/^\d{2}:\d{2}$/.test(time)) { setMsg(msg, 'Pick the time you started.', 'bad'); $('logTime').focus(); return; }
+    if (!(minutes >= 1 && minutes <= 960)) { setMsg(msg, 'Type how many minutes it took (1 to 960).', 'bad'); $('logMinutes').focus(); return; }
+    var dayRadio = document.querySelector('input[name="logday"]:checked');
+    var day = dayRadio && dayRadio.value === 'yesterday' ? 'yesterday' : 'today';
+    var projectId = $('logProject').value;
+    S.addingLog = true;
+    var btn = $('logBtn');
+    btn.disabled = true;
+    btn.textContent = 'Adding...';
+    setMsg(msg, '', '');
+    var g = S.gen;
+    var call = server(function (r) {
+      if (stale(g)) return;
+      S.addingLog = false;
+      btn.disabled = false;
+      btn.textContent = 'Add log';
+      if (!r.ok) {
+        if (isAuthFailure(r)) { dropStore(PIN_KEY); showPin(r); return; }
+        setMsg(msg, str(r.message) || OFFLINE, 'bad');
+        return;
+      }
+      var saved = r.log || {};
+      S.data.logs.push(saved);
+      $('logText').value = '';
+      $('logMinutes').value = '';
+      renderLog();
+      setMsg(msg, 'Logged for ' + (day === 'yesterday' ? 'Yesterday' : 'Today') + ': ' + str(saved.description || text) + ' (' + fmtHM(minutes) + ').', 'good');
+    });
+    if (call) call.phoneAddLog(S.pin, { text: text, projectId: projectId, time: time, minutes: minutes, day: day });
+  }
+
   // ---- Wiring ----
   $('keys').addEventListener('click', function (ev) {
     var b = ev.target.closest ? ev.target.closest('button') : null;
@@ -903,6 +987,7 @@ button { background: none; border: 0; cursor: pointer; }
   $('refreshBtn').addEventListener('click', refresh);
   $('moreBtn').addEventListener('click', loadOlder);
   $('addForm').addEventListener('submit', addTask);
+  $('logForm').addEventListener('submit', addLog);
   $('retryBtn').addEventListener('click', start);
   setInterval(function () { if (S.data && !$('mainView').hidden) renderBand(); }, 30000);
 

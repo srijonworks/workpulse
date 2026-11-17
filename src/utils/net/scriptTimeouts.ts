@@ -9,6 +9,7 @@ const SERVER_MS: Record<string, number> = {
   ping: 15 * SECOND,
   sendTestEmail: 50 * SECOND,
   sendDayEmail: 50 * SECOND,
+  saveHistory: 60 * SECOND,
   saveBackup: 140 * SECOND,
   loadBackup: 140 * SECOND,
 };

@@ -73,3 +73,19 @@ describe('generateAiReport', () => {
     }
   });
 });
+
+describe('report period', () => {
+  beforeEach(() => vi.stubGlobal('navigator', { onLine: true }));
+  afterEach(() => vi.unstubAllGlobals());
+  it('the template uses the period label, not today', async () => {
+    const r = await generateAiReport({ ...base, ai: 'none', period: { from: '2026-11-06', to: '2026-11-12', label: 'week of Fri, Nov 6 to Thu, Nov 12' } });
+    expect(r.text).toContain('week of Fri, Nov 6 to Thu, Nov 12');
+  });
+  it('the prompt carries the period and the context', async () => {
+    const f = reply(true, { text: 'ok' });
+    await generateAiReport({ ...base, ai: 'claude', fetchFn: f, period: { from: 'a', to: 'b', label: 'L' }, context: 'CTX-LINE' });
+    const body = JSON.parse(f.mock.calls[0][1].body);
+    expect(body.prompt).toContain('CTX-LINE');
+    expect(body.prompt).toContain('Covers: L');
+  });
+});

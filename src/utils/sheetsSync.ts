@@ -26,7 +26,8 @@ async function callScript(scriptUrl: string, action: string, method: 'GET' | 'PO
   if (data.status === 'ok') return { ok: true, data };
   const said = typeof data.message === 'string' && data.message ? data.message : typeof data.error === 'string' ? data.error : '';
   const code = typeof data.code === 'string' ? data.code : '';
-  return { ok: false, message: said, retryable: code === 'busy' || code === 'timeout' || isTransientSheetText(said) };
+  const detail = typeof data.detail === 'string' ? data.detail : '';
+  return { ok: false, message: said, retryable: code === 'busy' || code === 'timeout' || isTransientSheetText(said) || isTransientSheetText(detail) };
 }
 
 export async function testSheetConnection(scriptUrl: string): Promise<SyncResult> {

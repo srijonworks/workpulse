@@ -15,9 +15,10 @@ You need the Google Sheet you already sync logs to, with its script. A phone and
    **Deploy > Manage deployments**, press the pencil on your existing deployment, set **Version** to
    **New version**, press **Deploy**. Do not choose **New deployment**: it makes a new address and WorkPulse
    would stop reaching the Sheet. (First time ever? Follow the steps at the top of the script instead.)
-4. Google asks for permission again. Allow all of it: the Sheet, sending email to you, and running a daily timer.
+4. Google asks for permission again. Allow all of it: the Sheet, sending email to you, and running timers (the daily one and
+   the one-off ones that send a standup email later).
    (If a screen says the app is not verified, choose Advanced and continue; it is your own script.)
-5. Back in WorkPulse, **Settings > Phone & evening email**. The section should say the script is version 3.
+5. Back in WorkPulse, **Settings > Phone & evening email**. The section should say the script is version 6.
    If it says an older version, the paste or the new version in step 3 did not take; repeat them.
 6. Press **Set PIN** and type a 4-digit PIN twice. WorkPulse keeps only a token for this computer, never the PIN.
 7. Choose the time for the evening email (from 00:30 to 23:29), tick **Send me an evening email**, press **Save**, then
@@ -36,7 +37,24 @@ Notes:
 - Updating WorkPulse's script in future (a new version of the app may bring a new script): paste it again and update
   the same deployment (step 3). The change only takes effect after that new version is deployed.
 - The Sheet gains tabs (`WorkPulse_Tasks`, `WorkPulse_Days`, `WorkPulse_Recent`, `WorkPulse_Inbox`,
-  `WorkPulse_Projects`, and from version 4 `WorkPulse_Backup`). `WorkPulse_Logs` is unchanged. Do not edit the new tabs; WorkPulse rewrites them.
+  `WorkPulse_Projects`, from version 4 `WorkPulse_Backup`, and from version 6 `WorkPulse_DayHistory` and `WorkPulse_Standups`).
+  `WorkPulse_Logs` keeps its columns and gains an `Origin` column at the end (version 6; `auto` for a log WorkPulse wrote itself).
+  Do not edit the new tabs; WorkPulse rewrites them.
+
+## Updating to script version 6
+
+Version 6 adds: log writes that wait for the Sheet's lock (a busy Sheet answers "busy" and nothing is written, so WorkPulse
+simply sends the log again later), the `Origin` column, the `WorkPulse_DayHistory` and `WorkPulse_Standups` tabs, standup
+emails from your own Gmail (a day's or a week's standup text plus a link to the Sheet, sent at most once each, optionally
+a little later), and a form on the phone page to add a log for work done outside the office. Version 5 of WorkPulse keeps
+working with a version 6 script; the new features wait until the script says version 6.
+
+1. In WorkPulse, **Settings > Google Sheet > Set up the sheet: Apps Script code**, press **Copy code**.
+2. In the Sheet, **Extensions > Apps Script**, delete the old code, paste the new script, and save.
+3. **Deploy > Manage deployments**, press the pencil on your existing deployment, set **Version** to **New version**,
+   press **Deploy**. Never choose **New deployment**: it makes a new address and WorkPulse would stop reaching the Sheet.
+4. Allow the permissions Google asks for (sending email and timers are used by the standup emails).
+5. In WorkPulse, **Settings > Phone & evening email** should now say version 6 (or open the `/exec` link with `?action=ping`).
 
 ## Backup to the Sheet
 
@@ -62,8 +80,8 @@ cleared browser or a dead computer does not lose it.
 
 The automated tests use fakes for Google. Do these once against the real Sheet, and tick them off.
 
-1. **Version.** WorkPulse Settings > Phone & evening email says script version 3 (or open the `/exec` link with
-   `?action=ping`; it answers `"version":3`).
+1. **Version.** WorkPulse Settings > Phone & evening email says script version 6 (or open the `/exec` link with
+   `?action=ping`; it answers `"version":6`).
 2. **Same URL.** After step 3 above the link in WorkPulse still works with no change. (Editing the existing
    deployment keeps the URL; **New deployment** would not.)
 3. **Phone page opens.** `<your /exec link>?page=phone` shows the PIN keypad. A wrong PIN says so and counts the
@@ -82,7 +100,12 @@ The automated tests use fakes for Google. Do these once against the real Sheet, 
     the phone page's logs under **Show earlier days** (Sheets can store them as dates).
 11. **Time zone check.** In the script editor, run `Utilities.formatDate(new Date(), 'Not/AZone', 'yyyy-MM-dd')`
     in a scratch function: it should throw. The script relies on that to reject a bad time zone.
-12. **Google's script runner on the phone.** `google.script.run` works from the phone page that opens without a
+12. **Standup email.** With a standup saved for a day, send it with no delay: one email arrives from your own address with
+    the text and a link to the Sheet; asking again sends nothing more. Send one with a 2-minute delay: the Apps Script
+    **Triggers** list shows a one-off trigger for `sendEveningEmail`, the email arrives once, and the trigger is gone afterwards.
+13. **Log from the phone.** On the phone page, Add tab, **Log work done outside the office**: the log shows under Log
+    right away and as a row in `WorkPulse_Logs`.
+14. **Google's script runner on the phone.** `google.script.run` works from the phone page that opens without a
     Google sign-in, and the remembered PIN survives a page reload on iPhone Safari and on Android Chrome. This is
     best effort: if a browser forgets the PIN, typing it each time is acceptable.
 
