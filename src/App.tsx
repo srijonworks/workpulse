@@ -92,6 +92,7 @@ import { DiskCopyBanner } from './components/DiskCopyBanner';
 import { useHeartbeat } from './hooks/useHeartbeat';
 import { useAutoProjects } from './hooks/useAutoProjects';
 import { useAutoDay } from './hooks/useAutoDay';
+import { useDayClose } from './hooks/useDayClose';
 import { writeHeartbeat } from './utils/heartbeat';
 import { desktopBridge } from './utils/desktopBridge';
 import { recordRepairs, repairData } from './utils/dataDoctor';
@@ -188,6 +189,7 @@ export default function App() {
     message: string,
     type: 'success' | 'error' | 'info' = 'success',
     action?: ToastMessage['action'],
+    durationMs?: number,
   ) => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     if (saveFailedNow.current && type !== 'error') {
@@ -196,7 +198,7 @@ export default function App() {
     }
     // Errors and anything with an action (Undo, Retry) stay 8 s; the toast itself dismisses on a
     // timer that hovering or focusing it pauses (see ToastContainer).
-    setToasts((prev) => [...prev, { id, type, message, action, durationMs: action || type === 'error' ? 8000 : 3500 }]);
+    setToasts((prev) => [...prev, { id, type, message, action, durationMs: durationMs ?? (action || type === 'error' ? 8000 : 3500) }]);
   };
 
   // Save wrappers. A save that fails is kept and retried by the save engine, and the "Not saved" notice
@@ -597,6 +599,56 @@ export default function App() {
     }
   };
 
+  // The day-close job's logs: marked "auto", saved with the tasks they cover, and announced with an Undo.
+  const handleAddAutoLogs = (date: string, batch: Omit<WorkLog, 'id' | 'createdAt'>[]) => {
+    if (batch.length === 0) return;
+    const stamp = Date.now();
+    const created: WorkLog[] = batch.map((data, i) => ({
+      ...data,
+      origin: 'auto' as const,
+      id: `log-${stamp}-${i}-${Math.random().toString(36).substring(2, 6)}`,
+      createdAt: new Date().toISOString(),
+    }));
+    const ids = new Set(created.map((l) => l.id));
+    const tasksBefore = backlogRef.current;
+    setLogs((prev) => {
+      const next = [...created, ...prev];
+      saveLogs(next);
+      return next;
+    });
+    const loggedTaskIds = created.flatMap((l) => taskIdsOf(l.sourceIds ?? []));
+    if (loggedTaskIds.length > 0) {
+      setBacklog((prev) => {
+        const next = markTasksLogged(prev, loggedTaskIds, new Date().toISOString());
+        if (next !== prev) saveBacklog(next);
+        return next;
+      });
+    }
+    if (settings.googleScriptUrl) {
+      syncBatchLogsToSheet(settings.googleScriptUrl, created).then((res) => {
+        if (res.success) markLogsSynced(created.map((l) => l.id));
+        else reportSyncFailure(res.message, () => handleSyncGoogleSheet());
+      });
+    }
+    const undo = () => {
+      setLogs((prev) => {
+        const next = prev.filter((l) => !ids.has(l.id));
+        saveLogs(next);
+        return next;
+      });
+      if (loggedTaskIds.length > 0) {
+        // The tasks' time is free to be logged again.
+        const idsSet = new Set(loggedTaskIds);
+        setBacklog((prev) => {
+          const next = prev.map((t) => (idsSet.has(t.id) ? { ...t, loggedSeconds: tasksBefore.find((b) => b.id === t.id)?.loggedSeconds } : t));
+          saveBacklog(next);
+          return next;
+        });
+      }
+    };
+    addToast(`${created.length} log${created.length === 1 ? '' : 's'} for ${date === localDateStr() ? 'today' : date} added automatically. Nothing to do unless one is wrong.`, 'info', { label: 'Undo', onClick: undo }, 30000);
+  };
+
   const handleEditLog = (log: WorkLog) => setLogForm({ editing: log, prefill: null });
   const handleOpenLogForm = (prefill: LogFormPrefill | null) => setLogForm({ editing: null, prefill });
 
@@ -643,6 +695,7 @@ export default function App() {
       // a copy is a new log: it must not inherit "already synced" or "edited" from the original
       syncedAt: undefined,
       editedAt: undefined,
+      origin: undefined,
       // the original keeps the activity it was suggested from; a copy must not hold it too, or
       // deleting the original would never free that activity for suggestions again
       sourceIds: undefined,
@@ -1368,6 +1421,15 @@ export default function App() {
   const diskCopyState = useDiskCopyState();
   // "Alive now" every 30 s: after a shutdown it says when the PC was last in use (the automatic day uses it later).
   const lastAlive = useHeartbeat(dataLoaded);
+  useDayClose({
+    enabled: dataLoaded && settings.autoDayEnabled !== false,
+    workdays,
+    logs,
+    backlog,
+    projects,
+    settings,
+    addAutoLogs: handleAddAutoLogs,
+  });
   const autoDay = useAutoDay({
     enabled: dataLoaded && settings.autoDayEnabled !== false,
     workdays,

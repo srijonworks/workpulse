@@ -21,6 +21,8 @@ export interface WorkLog {
   // When the user last edited this log; a log edited after its last sync needs sending again.
   editedAt?: string;
   isSynthesized?: boolean;
+  // 'auto' = written by the day-close job from the day's activity (shown with an Auto badge; manual logs have none).
+  origin?: 'auto';
   // Activity item ids this log was suggested from; they are not suggested again. Never sent to the Sheet.
   sourceIds?: string[];
   underlyingTasks?: {

@@ -98,6 +98,7 @@ export const LogRow: React.FC<LogRowProps> = ({ log, project, onEdit, onDuplicat
               </button>
             )}
             <SampleBadge show={isSampleLog(log)} />
+            {log.origin === 'auto' && <span className="font-semibold" title="Added automatically from your day's activity">Auto</span>}
             {copied && (
               <span role="status" className={copied === 'ok' ? 'text-[var(--accent-text)]' : 'text-danger'}>
                 {copied === 'ok' ? 'Copied' : 'Could not copy'}

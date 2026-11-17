@@ -1145,6 +1145,41 @@ def auto_day_closes_forgotten_day(s):
     s.no_errors()
 
 
+@check("auto_day_close_adds_logs")
+def auto_day_close_adds_logs(s):
+    """Two minutes after a clock-out the day is closed out by itself: a log marked Auto is added from the done task,
+    it can be undone, a log written by hand is left alone, and the day is recorded so it is not done twice."""
+    p = s.page
+    task = {"id": "task-smoke-auto", "title": "Smoke auto task", "projectId": "proj-1", "dueDate": "2026-11-15", "completed": True,
+            "stage": "done", "originalDate": "2026-11-15", "isRolledOver": False, "elapsedSeconds": 1800,
+            "completedAt": "2026-11-15T08:00:00.000Z", "isRunning": False}
+    manual = {"id": "log-1731000000000-hand", "date": "2026-11-15", "time": "10:00", "projectId": "proj-1", "projectName": "Core Platform & API",
+              "description": "Smoke: meeting by hand", "status": "completed", "tags": [], "durationMinutes": 120, "createdAt": "2026-11-15T04:00:00.000Z"}
+    p.evaluate("([ack, ackv, t, m]) => { localStorage.setItem(ack, ackv);"
+               " localStorage.setItem('workpulse_backlog', JSON.stringify([t]));"
+               " localStorage.setItem('workpulse_logs', JSON.stringify([m])); }",
+               [ACK_KEY, ACK_VALUE, task, manual])
+    _stub_activity(s)  # the scan and the AI are stubbed: two commits in a folder linked to proj-1
+    _auto_day_on(s, {"2026-11-15": {"clockIn": "2026-11-15T03:00:00.000Z", "clockOut": "2026-11-15T11:00:00.000Z"}})
+    expect(p.get_by_text("added automatically")).to_be_visible(timeout=40000)
+    logs = s.ls("workpulse_logs")
+    auto = [l for l in logs if l.get("origin") == "auto"]
+    assert auto and all(l["date"] == "2026-11-15" for l in auto), f"expected auto logs for the day, got {logs}"
+    assert any(l["id"] == manual["id"] for l in logs), "the log written by hand must stay"
+    journal = s.ls("workpulse_journal")
+    assert journal["2026-11-15"]["state"] == "done" and journal["2026-11-15"]["added"] == len(auto), journal
+    # Undo takes the auto logs away and leaves the manual one
+    p.get_by_role("button", name="Undo").click()
+    p.wait_for_timeout(400)
+    left = s.ls("workpulse_logs")
+    assert not [l for l in left if l.get("origin") == "auto"] and any(l["id"] == manual["id"] for l in left), "Undo must remove only the auto logs"
+    # the day is in the journal, so it is not done again after a reload
+    s.reload()
+    p.wait_for_timeout(2500)
+    assert not [l for l in s.ls("workpulse_logs") if l.get("origin") == "auto"], "the day was closed out twice"
+    s.no_errors()
+
+
 @check("error_boundary_isolates_screen")
 def error_boundary_isolates_screen(s):
     """A screen that breaks shows a plain message and a way forward, the other screens keep working, and the data is
@@ -1376,8 +1411,12 @@ def _seed_clocked_in(s):
 
 def _wait_for(s, cond, tries=50):
     for _ in range(tries):
-        if cond():
-            return
+        try:
+            if cond():
+                return
+        except Exception as e:  # the page is reloading (a restore or an import): look again in a moment
+            if "context was destroyed" not in str(e) and "navigation" not in str(e):
+                raise
         s.page.wait_for_timeout(100)
 
 
