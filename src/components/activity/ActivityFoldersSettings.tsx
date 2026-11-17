@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Project } from '../../types';
 import type { ActivityFolder, ActivitySources } from '../../utils/activity/types';
+import { byDisplayRank } from '../../utils/activity/registry';
 
 interface ActivityFoldersSettingsProps {
   folders: ActivityFolder[];
@@ -17,24 +18,28 @@ export const ActivityFoldersSettings: React.FC<ActivityFoldersSettingsProps> = (
     return p ? (p.trashedAt ? `${p.name} (in the Trash)` : p.name) : 'Project removed';
   };
 
+  const isOn = (id: string) => (sources as Record<string, boolean | undefined>)[id] !== false;
+  // Settings order (git first); the auto-check box sits right after the first source, as it always has.
+  const sourceBoxes = byDisplayRank().map((d) => (
+    <label key={d.id} className="flex items-start gap-2.5 text-[length:var(--fs-small)] text-[var(--text-main)] cursor-pointer">
+      <input
+        type="checkbox"
+        checked={isOn(d.id)}
+        onChange={(e) => onSourcesChange({ ...sources, [d.id]: e.target.checked })}
+        className="mt-0.5"
+      />
+      <span>
+        <span className="font-semibold">{d.settingsText.title}</span>
+        <span className="block text-[var(--text-muted)]">{d.settingsText.description}</span>
+      </span>
+    </label>
+  ));
+
   return (
     <div className="space-y-6">
       <fieldset className="space-y-3">
         <legend className="text-[length:var(--fs-small)] font-semibold text-[var(--text-main)]">What to read</legend>
-        <label className="flex items-start gap-2.5 text-[length:var(--fs-small)] text-[var(--text-main)] cursor-pointer">
-          <input
-            type="checkbox"
-            checked={sources.git}
-            onChange={(e) => onSourcesChange({ ...sources, git: e.target.checked })}
-            className="mt-0.5"
-          />
-          <span>
-            <span className="font-semibold">Include git commits</span>
-            <span className="block text-[var(--text-muted)]">
-              Commits you made today in these folders.
-            </span>
-          </span>
-        </label>
+        {sourceBoxes.slice(0, 1)}
         <label className="flex items-start gap-2.5 text-[length:var(--fs-small)] text-[var(--text-main)] cursor-pointer">
           <input
             type="checkbox"
@@ -50,63 +55,7 @@ export const ActivityFoldersSettings: React.FC<ActivityFoldersSettingsProps> = (
             </span>
           </span>
         </label>
-        <label className="flex items-start gap-2.5 text-[length:var(--fs-small)] text-[var(--text-main)] cursor-pointer">
-          <input
-            type="checkbox"
-            checked={sources.claude}
-            onChange={(e) => onSourcesChange({ ...sources, claude: e.target.checked })}
-            className="mt-0.5"
-          />
-          <span>
-            <span className="font-semibold">Include Claude Code prompts</span>
-            <span className="block text-[var(--text-muted)]">
-              Reads your Claude Code session history for these folders: the first line of your prompts, session titles
-              and edited file names. File contents are never read.
-            </span>
-          </span>
-        </label>
-        <label className="flex items-start gap-2.5 text-[length:var(--fs-small)] text-[var(--text-main)] cursor-pointer">
-          <input
-            type="checkbox"
-            checked={sources.opencode !== false}
-            onChange={(e) => onSourcesChange({ ...sources, opencode: e.target.checked })}
-            className="mt-0.5"
-          />
-          <span>
-            <span className="font-semibold">Include OpenCode prompts</span>
-            <span className="block text-[var(--text-muted)]">
-              Reads your OpenCode history on this computer for these folders: the first line of your prompts only.
-            </span>
-          </span>
-        </label>
-        <label className="flex items-start gap-2.5 text-[length:var(--fs-small)] text-[var(--text-main)] cursor-pointer">
-          <input
-            type="checkbox"
-            checked={sources.codex !== false}
-            onChange={(e) => onSourcesChange({ ...sources, codex: e.target.checked })}
-            className="mt-0.5"
-          />
-          <span>
-            <span className="font-semibold">Include Codex prompts</span>
-            <span className="block text-[var(--text-muted)]">
-              Reads your Codex CLI history on this computer for these folders: the first line of your prompts only.
-            </span>
-          </span>
-        </label>
-        <label className="flex items-start gap-2.5 text-[length:var(--fs-small)] text-[var(--text-main)] cursor-pointer">
-          <input
-            type="checkbox"
-            checked={sources.docs !== false}
-            onChange={(e) => onSourcesChange({ ...sources, docs: e.target.checked })}
-            className="mt-0.5"
-          />
-          <span>
-            <span className="font-semibold">Include documents</span>
-            <span className="block text-[var(--text-muted)]">
-              Word, Excel, PowerPoint and PDF files you changed today in these folders. Only the file name and time are used; files are never opened.
-            </span>
-          </span>
-        </label>
+        {sourceBoxes.slice(1)}
       </fieldset>
 
       <div className="space-y-3">

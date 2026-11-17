@@ -19,6 +19,7 @@ import { createFileLog } from './src/shell/fileLog';
 import { CLAUDE_MODEL_LABEL, claudeWriterGuard, eodViaClaude, standupViaClaude, writerFromRequest } from './src/server/aiWriter';
 import { createFolderPicker, isAllowedPickOrigin } from './src/server/folderPicker';
 import { findRepos, scanActivity } from './src/server/activityReaders';
+import { ACTIVITY_SOURCE_IDS } from './src/utils/activity/registry';
 import { ACTIVITY_TASKS_SCHEMA, buildActivityPrompt, parseAiTasks } from './src/utils/activity/aiTasks';
 import { runClaudeJson } from './src/server/claudeCli';
 import { clip, redactSecrets } from './src/utils/activity/sanitize';
@@ -267,7 +268,7 @@ async function startServer() {
       const result = await scanActivity({
         date: body.date,
         folders: body.folders,
-        sources: { claude: body.sources.claude === true, git: body.sources.git === true, opencode: body.sources.opencode === true, codex: body.sources.codex === true, docs: body.sources.docs === true },
+        sources: Object.fromEntries(ACTIVITY_SOURCE_IDS.map((id) => [id, (body.sources as Record<string, unknown>)[id] === true])),
       });
       return res.json(result);
     } catch (err: any) {

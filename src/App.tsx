@@ -64,6 +64,7 @@ import { keepDeviceSettings } from './utils/phoneSettings';
 import { applyPlan, planCandidates, planSummary } from './utils/planYourDay';
 import { publishTimers } from './utils/timerStore';
 import { aiFromSettings, autoScanFromSettings, sourcesFromSettings } from './utils/activity/settings';
+import { ACTIVITY_SOURCES } from './utils/activity/registry';
 import { taskIdsOf } from './utils/activity/suggestions';
 import type { ActivityFolder } from './utils/activity/types';
 
@@ -143,11 +144,7 @@ export default function App() {
   const activitySetupKey = JSON.stringify([
     (settings.activityFolders ?? []).map((f) => [f.path, f.projectId]),
     projects.filter((p) => p.trashedAt).map((p) => p.id),
-    settings.activityUseGit,
-    settings.activityUseClaude,
-    settings.activityUseOpenCode,
-    settings.activityUseCodex,
-    settings.activityUseDocs,
+    ACTIVITY_SOURCES.map((d) => settings[d.settingKey]),
     settings.activityAi,
   ]);
   useEffect(() => {
@@ -1713,17 +1710,15 @@ export default function App() {
   };
 
   const activitySources = sourcesFromSettings(settings);
-  const sourcesGit = activitySources.git;
-  const sourcesClaude = activitySources.claude;
-  const sourcesOpenCode = activitySources.opencode;
-  const sourcesCodex = activitySources.codex;
-  const sourcesDocs = activitySources.docs;
+  const sourcesKey = ACTIVITY_SOURCES.map((d) => ((activitySources as Record<string, boolean>)[d.id] ? '1' : '0')).join('');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const stableSources = useMemo(() => activitySources, [sourcesKey]);
   const ai = aiFromSettings(settings);
   const autoScan = autoScanFromSettings(settings);
   const activityProps: TodayActivityProps = useMemo(
     () => ({
       folders,
-      sources: { git: sourcesGit, claude: sourcesClaude, opencode: sourcesOpenCode, codex: sourcesCodex, docs: sourcesDocs },
+      sources: stableSources,
       ai,
       autoScan,
       geminiApiKey: settings.geminiApiKey,
@@ -1731,7 +1726,7 @@ export default function App() {
       onOpenSettings: h.openSettings,
     }),
     // h.* never change identity, so they are not dependencies.
-    [folders, sourcesGit, sourcesClaude, sourcesOpenCode, sourcesCodex, sourcesDocs, ai, autoScan, settings.geminiApiKey],
+    [folders, stableSources, ai, autoScan, settings.geminiApiKey],
   );
 
   const hasSheet = Boolean(settings.googleScriptUrl);

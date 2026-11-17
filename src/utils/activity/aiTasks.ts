@@ -1,4 +1,5 @@
 import { clip, redactSecrets } from './sanitize';
+import { describe } from './registry';
 import type { ActivityItem, AiTask } from './types';
 
 const PER_FOLDER_CAP = 40;
@@ -82,7 +83,7 @@ export function buildActivityPrompt(
       .map((it) => {
         const short = `i${++n}`;
         shortToId[short] = it.id;
-        const kind = it.source === 'git' ? 'commit' : it.source === 'task' ? 'done task' : it.source === 'opencode' ? 'opencode' : it.source === 'codex' ? 'codex' : 'claude';
+        const kind = it.source === 'task' ? 'done task' : (describe(it.source)?.aiKind ?? 'claude');
         return `[${short}] (${kind}) ${clip(redactSecrets(it.text), ITEM_TEXT_MAX)}`;
       });
     sections.push(`Project: ${name}\n${rows.join('\n')}`);

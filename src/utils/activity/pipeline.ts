@@ -1,4 +1,5 @@
 import { scanActivityApi, suggestTasksApi } from './client';
+import { ACTIVITY_SOURCES, byDisplayRank, type SourceDescriptor } from './registry';
 import { buildSuggestions, consumedIds, dropConsumed, projectFolderKey, taskItems, templateTasks } from './suggestions';
 import type { BacklogTask, Project, WorkLog } from '../../types';
 import type {
@@ -54,7 +55,7 @@ const REAL: Deps = { scan: scanActivityApi, suggest: suggestTasksApi };
  * throws (the dialog shows it); a failed AI call never does.
  */
 export async function loadSuggestions(args: PipelineArgs, deps: Deps = REAL): Promise<PipelineResult> {
-  const canScan = args.folders.length > 0 && (args.sources.claude || args.sources.git || args.sources.opencode || args.sources.codex || args.sources.docs);
+  const canScan = args.folders.length > 0 && ACTIVITY_SOURCES.some((d) => args.sources[d.id as ActivitySource]);
   const empty: ScanResponse = {
     items: [],
     status: { claude: { ok: true, count: 0, note: 'Turned off in Settings' }, git: { ok: true, count: 0, note: 'Turned off in Settings' } },
@@ -101,17 +102,19 @@ export async function loadSuggestions(args: PipelineArgs, deps: Deps = REAL): Pr
   return { suggestions, status: scanned.status, itemsKey, notice: aiTasks ? undefined : notice };
 }
 
-const LABEL: Record<ActivitySource, string> = { claude: 'Claude Code prompts', git: 'Git commits', opencode: 'OpenCode prompts', codex: 'Codex prompts', docs: 'Documents' };
-
 /** One plain line per switched-on source: how much was found, and any note about it. */
-export function describeSources(sources: ActivitySources, status: Partial<Record<ActivitySource, SourceStatus>>): string[] {
+export function describeSources(
+  sources: ActivitySources,
+  status: Partial<Record<ActivitySource, SourceStatus>>,
+  registry: readonly SourceDescriptor[] = ACTIVITY_SOURCES,
+): string[] {
   const lines: string[] = [];
-  for (const source of ['claude', 'git', 'opencode', 'codex', 'docs'] as const) {
-    if (!sources[source]) continue;
-    const s = status[source];
+  for (const d of registry) {
+    if (!(sources as Record<string, boolean | undefined>)[d.id]) continue;
+    const s = (status as Record<string, SourceStatus | undefined>)[d.id];
     if (!s) continue;
     const head = !s.ok ? "couldn't read." : s.count === 0 ? 'nothing found.' : `${s.count} found.`;
-    lines.push(`${LABEL[source]}: ${head}${s.note ? ` ${s.note}` : ''}`);
+    lines.push(`${d.label}: ${head}${s.note ? ` ${s.note}` : ''}`);
   }
   return lines;
 }
@@ -120,7 +123,8 @@ export function describeSources(sources: ActivitySources, status: Partial<Record
  * Identifies what the data notice covered: which sources are read and which AI gets the text. The
  * notice is shown again when either changes, because the data then goes somewhere new.
  */
-export function noticeSignature(sources: ActivitySources, ai: ActivityAi): string {
-  // OpenCode and Codex are added only when on, so a notice agreed to before they existed stays valid until they are switched on.
-  return `${[sources.git ? 'git' : '', sources.claude ? 'claude' : '', sources.opencode ? 'opencode' : '', sources.codex ? 'codex' : '', sources.docs ? 'docs' : ''].filter(Boolean).join('+')}|${ai}`;
+export function noticeSignature(sources: ActivitySources, ai: ActivityAi, registry: readonly SourceDescriptor[] = ACTIVITY_SOURCES): string {
+  // Only sources that are on appear, in a fixed order, so a notice agreed to before a source existed stays valid until it is switched on.
+  const on = byDisplayRank(registry).filter((d) => (sources as Record<string, boolean | undefined>)[d.id]);
+  return `${on.map((d) => d.id).join('+')}|${ai}`;
 }

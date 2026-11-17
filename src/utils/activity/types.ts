@@ -1,4 +1,6 @@
-export type ActivitySource = 'claude' | 'git' | 'opencode' | 'codex' | 'docs';
+import type { ActivitySource, ActivitySources } from './registry';
+
+export type { ActivitySource, ActivitySources };
 
 /** Where an item came from: a scanned source, or a done task of the day (merged into the same suggestions). */
 export type ItemSource = ActivitySource | 'task';
@@ -9,16 +11,6 @@ export type ActivityAi = 'claude' | 'gemini' | 'none';
 export interface ActivityFolder {
   path: string;
   projectId: string;
-}
-
-export interface ActivitySources {
-  claude: boolean;
-  git: boolean;
-  /** OpenCode and Codex CLI history. Read only when true (the page turns them on after the user agreed to the notice). */
-  opencode?: boolean;
-  codex?: boolean;
-  /** Document files (names and times only). Read only when true. */
-  docs?: boolean;
 }
 
 export interface ActivityItem {
@@ -47,7 +39,8 @@ export interface ScanRequest {
 
 export interface ScanResponse {
   items: ActivityItem[];
-  status: Record<'claude' | 'git', SourceStatus> & Partial<Record<'opencode' | 'codex' | 'docs', SourceStatus>>;
+  /** One entry per source that was asked for; claude and git are always there ("Turned off in Settings" when off). */
+  status: Record<'claude' | 'git', SourceStatus> & Partial<Record<ActivitySource, SourceStatus>>;
 }
 
 export interface AiTask {

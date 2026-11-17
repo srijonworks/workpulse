@@ -1,5 +1,6 @@
 import type { AppSettings } from '../../types';
 import { isUnderFolder } from './folderMatch';
+import { describe } from './registry';
 import type { ActivityFolder, ActivityItem } from './types';
 
 // Projects made on their own from the folders the user works in. A folder becomes a project only after real work was
@@ -32,15 +33,14 @@ export function unlinkedRepos(repos: string[], linked: ActivityFolder[], ignored
   return repos.filter((r) => !linked.some((f) => isUnderFolder(r, f.path)) && !ignored.some((i) => isUnderFolder(r, i)));
 }
 
-const PROMPT_SOURCES = new Set(['claude', 'opencode', 'codex']);
-
 /** The folders (of those scanned) where real work was seen. */
 export function foldersWithRealWork(items: ActivityItem[]): string[] {
   const prompts = new Map<string, number>();
   const real = new Set<string>();
   for (const i of items) {
-    if (i.source === 'git' || i.source === 'docs') real.add(i.folder);
-    else if (PROMPT_SOURCES.has(i.source) && !i.text.startsWith('Session: ') && !i.text.startsWith('Edited ')) {
+    const d = describe(i.source);
+    if (d && !d.promptLike) real.add(i.folder);
+    else if (d?.promptLike && !i.text.startsWith('Session: ') && !i.text.startsWith('Edited ')) {
       prompts.set(i.folder, (prompts.get(i.folder) ?? 0) + 1);
     }
   }

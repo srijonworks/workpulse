@@ -2,6 +2,7 @@ import { localTimeStr } from '../dates';
 import { minutesFromSeconds } from '../duration';
 import { unloggedSeconds } from '../taskLogging';
 import { clusterTimes } from './time';
+import { byDisplayRank, isPromptLike } from './registry';
 import type { BacklogTask, Project, WorkLog } from '../../types';
 import type { ActivityFolder, ActivityItem, AiTask, Suggestion } from './types';
 
@@ -66,20 +67,14 @@ export function trackedMinutesFor(
 }
 
 function evidenceOf(items: ActivityItem[]): string {
-  const commits = items.filter((i) => i.source === 'git').length;
-  const sessionsOf = (source: string) => new Set(items.filter((i) => i.source === source).map((i) => i.id.split(':')[1])).size;
-  const sessions = sessionsOf('claude');
-  const openCode = sessionsOf('opencode');
-  const codex = sessionsOf('codex');
-  const docs = items.filter((i) => i.source === 'docs').length;
   const doneTasks = items.filter((i) => i.source === 'task').length;
   const parts: string[] = [];
   if (doneTasks > 0) parts.push(`${doneTasks} done ${doneTasks === 1 ? 'task' : 'tasks'}`);
-  if (commits > 0) parts.push(`${commits} commit${commits === 1 ? '' : 's'}`);
-  if (sessions > 0) parts.push(`${sessions} Claude session${sessions === 1 ? '' : 's'}`);
-  if (openCode > 0) parts.push(`${openCode} OpenCode session${openCode === 1 ? '' : 's'}`);
-  if (docs > 0) parts.push(`${docs} document${docs === 1 ? '' : 's'}`);
-  if (codex > 0) parts.push(`${codex} Codex session${codex === 1 ? '' : 's'}`);
+  for (const d of byDisplayRank()) {
+    const own = items.filter((i) => i.source === d.id);
+    const n = d.countSessions ? new Set(own.map((i) => i.id.split(':')[1])).size : own.length;
+    if (n > 0) parts.push(d.evidence(n));
+  }
   return parts.join(', ') || 'activity';
 }
 
@@ -194,7 +189,7 @@ export function templateTasks(items: ActivityItem[], projectNameByFolder: Record
   return [...byFolder].map(([folder, list]) => {
     const commits = distinct(list.filter((i) => i.source === 'git').map((i) => i.text));
     const prompts = distinct(
-      list.filter((i) => (i.source === 'claude' || i.source === 'opencode' || i.source === 'codex') && !i.text.startsWith('Session: ') && !i.text.startsWith('Edited ')).map((i) => i.text),
+      list.filter((i) => isPromptLike(i.source) && !i.text.startsWith('Session: ') && !i.text.startsWith('Edited ')).map((i) => i.text),
     );
     const taskTitles = distinct(list.filter((i) => i.source === 'task').map((i) => i.text));
     const subtasks = [...taskTitles, ...(commits.length > 0 ? commits : prompts)].slice(0, 12);

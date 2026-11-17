@@ -1,4 +1,5 @@
 import type { AppSettings } from '../../types';
+import { ACTIVITY_SOURCES, type ActivitySettingKey, type SourceDescriptor } from './registry';
 import type { ActivityAi, ActivityFolder, ActivitySources } from './types';
 
 /** A full path: a Windows drive path (E:\x or E:/x) or an absolute POSIX path. */
@@ -28,22 +29,24 @@ export function addActivityFolder(folders: ActivityFolder[], rawPath: string, pr
   return { ok: true, folders: [...folders, { path, projectId }] };
 }
 
-/** Git commits, Claude Code, OpenCode and Codex prompts are all on unless switched off. */
-export function sourcesFromSettings(s: Pick<AppSettings, 'activityUseClaude' | 'activityUseGit' | 'activityUseOpenCode' | 'activityUseCodex' | 'activityUseDocs'>): ActivitySources {
-  return { claude: s.activityUseClaude !== false, git: s.activityUseGit !== false, opencode: s.activityUseOpenCode !== false, codex: s.activityUseCodex !== false, docs: s.activityUseDocs !== false };
+/** Every registered source is on unless its setting is false. */
+export function sourcesFromSettings(
+  s: Pick<AppSettings, ActivitySettingKey>,
+  registry: readonly SourceDescriptor[] = ACTIVITY_SOURCES,
+): ActivitySources {
+  const out: Record<string, boolean> = {};
+  for (const d of registry) out[d.id] = (s as Record<string, unknown>)[d.settingKey] !== false;
+  return out as ActivitySources;
 }
 
 /** The settings fields for these choices; only values that differ from the defaults are stored. */
 export function activityFieldsFromSources(
   sources: ActivitySources,
-): Pick<AppSettings, 'activityUseClaude' | 'activityUseGit' | 'activityUseOpenCode' | 'activityUseCodex' | 'activityUseDocs'> {
-  return {
-    activityUseClaude: sources.claude ? undefined : false,
-    activityUseGit: sources.git ? undefined : false,
-    activityUseOpenCode: sources.opencode !== false ? undefined : false,
-    activityUseCodex: sources.codex !== false ? undefined : false,
-    activityUseDocs: sources.docs !== false ? undefined : false,
-  };
+  registry: readonly SourceDescriptor[] = ACTIVITY_SOURCES,
+): Pick<AppSettings, ActivitySettingKey> {
+  const out: Record<string, boolean | undefined> = {};
+  for (const d of registry) out[d.settingKey] = (sources as Record<string, boolean | undefined>)[d.id] !== false ? undefined : false;
+  return out as Pick<AppSettings, ActivitySettingKey>;
 }
 
 /** Claude Code unless another choice was saved. */
