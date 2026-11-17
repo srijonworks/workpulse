@@ -103,7 +103,7 @@ export const SearchPaletteModal: React.FC<SearchPaletteModalProps> = ({
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Search logs, projects, tags, links"
-            className="flex-1 bg-transparent text-xs sm:text-sm text-[var(--text-main)]"
+            className="v2-input h-11 min-w-0 flex-1 px-3 text-[length:var(--fs-body)] text-[var(--text-main)] placeholder:text-[var(--text-muted)]"
           />
           <IconButton label="Close search" onClick={onClose}>
             <X className="w-4 h-4" />

@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
+import { DatePicker } from '../ui/DatePicker';
+import { Select } from '../ui/Select';
 import { AlertTriangle, Loader2, RotateCw, Sparkles, X } from 'lucide-react';
 import { ModalShell } from '../ui/ModalShell';
 import { IconButton } from '../ui/IconButton';
@@ -311,12 +313,7 @@ export const ActivitySuggestionsPanel: React.FC<ActivitySuggestionsPanelProps> =
           />
         </div>
         <div className="flex flex-wrap items-center gap-2 pl-6">
-          <select value={r.projectId} onChange={(e) => update(s.key, { projectId: e.target.value })} aria-label="Project" className={FIELD}>
-            {!activeProjects.some((p) => p.id === r.projectId) && <option value={r.projectId}>{s.projectName}</option>}
-            {activeProjects.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
+          <Select inline compact ariaLabel="Project" value={r.projectId} onChange={(v) => update(s.key, { projectId: v })} options={[...(activeProjects.some((p) => p.id === r.projectId) ? [] : [{ value: r.projectId, label: s.projectName }]), ...activeProjects.map((p) => ({ value: p.id, label: p.name }))]} />
           <label className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
             <input
               type="number"
@@ -620,23 +617,22 @@ export const ActivitySuggestionsPanel: React.FC<ActivitySuggestionsPanelProps> =
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-xs text-[var(--text-muted)] flex items-center gap-1.5">
+          <div className="text-xs text-[var(--text-muted)] flex items-center gap-1.5">
             <span>Day</span>
-            <input
-              type="date"
+            <DatePicker
+              ariaLabel="Day"
+              className="min-w-[10rem]"
               value={date}
               max={localDateStr()}
-              onChange={(e) => {
-                if (!e.target.value) return;
-                const next = e.target.value;
+              onChange={(next) => {
+                if (!next) return;
                 setPickedDate(next);
                 // A day already checked this session shows what was kept; any other day is read now.
                 if (getActivitySession(next)) setPhase('ready');
                 else if (phase !== 'notice') setPhase('loading');
               }}
-              className={FIELD}
             />
-          </label>
+          </div>
           {headerEnd}
         </div>
       </div>

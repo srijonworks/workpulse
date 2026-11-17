@@ -1,3 +1,4 @@
+import { adjustedLabel } from '../../../utils/adjustTime';
 import React, { useId, useState } from 'react';
 import { Check } from 'lucide-react';
 import type { BacklogTask, Project, TaskStage } from '../../../types';
@@ -26,6 +27,8 @@ export interface TaskRowProps {
   onDeleteTask(id: string): void;
   /** Opens the edit dialog (title, project, date). "Edit" shows only when given. */
   onEditTask?(task: BacklogTask): void;
+  /** Opens "Adjust time" (a timer started late, or a total to correct). Shown when given. */
+  onAdjustTime?(task: BacklogTask): void;
   /** Replaces the meta line after the project name (e.g. a due date on the Tasks screen). */
   meta?: React.ReactNode;
   /** A muted "from Yesterday" after the meta, for a running/paused/blocked task dated before today. */
@@ -50,8 +53,8 @@ export function metaFor(task: BacklogTask, stage: TaskStage): string {
   const tracked = task.elapsedSeconds || 0;
   switch (stage) {
     case 'in_progress':
-      if (isRunningTask(task)) return task.startedAt ? `started ${timeOf(task.startedAt)}` : 'running';
-      return tracked > 0 ? `${hm(tracked)} tracked` : 'not started';
+      if (isRunningTask(task)) return `${task.startedAt ? `started ${timeOf(task.startedAt)}` : 'running'}${adjustedLabel(task) ? ` · ${adjustedLabel(task)}` : ''}`;
+      return tracked > 0 ? `${hm(tracked)} tracked${adjustedLabel(task) ? ` · ${adjustedLabel(task)}` : ''}` : 'not started';
     case 'paused':
       return tracked > 0 ? `paused · ${hm(tracked)} tracked` : 'paused';
     case 'blocked':
@@ -73,6 +76,7 @@ export const TaskRow: React.FC<TaskRowProps> = ({
   onReopen,
   onDeleteTask,
   onEditTask,
+  onAdjustTime,
   meta,
   fromLabel,
   selected,
@@ -100,6 +104,7 @@ export const TaskRow: React.FC<TaskRowProps> = ({
 
   const items: RowMenuItem[] = [];
   if (onEditTask) items.push({ label: 'Edit', onSelect: () => onEditTask(task) });
+  if (onAdjustTime && stage !== 'planned') items.push({ label: 'Adjust time', onSelect: () => onAdjustTime(task) });
   if (!done && stage !== 'blocked') items.push({ label: 'Block', onSelect: () => setBlocking(true) });
   if (stage !== 'planned')
     items.push({ label: 'Back to planned', onSelect: () => (done ? onReopen(task.id) : onStage(task.id, 'planned')) });

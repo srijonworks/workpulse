@@ -1,4 +1,5 @@
 import { DEFAULT_CLOCK_IN_MESSAGE, buildClockInMessage, clockInOpenPlan, parseChatTarget } from '../utils/clockInMessage';
+import { Select } from './ui/Select';
 import React, { createContext, useContext, useId, useRef, useState } from 'react';
 import { localDateStr } from '../utils/dates';
 import {
@@ -170,7 +171,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // Office day state
   const [workdayHours, setWorkdayHours] = useState<string>(String(settings.workdayHours ?? DEFAULT_WORKDAY_HOURS));
   const [hoursError, setHoursError] = useState<string | null>(null);
-  const [clockMsgOn, setClockMsgOn] = useState(settings.clockInMessageEnabled !== false);
+  const [clockMsgOn, setClockMsgOn] = useState(settings.clockInMessageEnabled === true);
   const [clockChat, setClockChat] = useState(settings.clockInChat ?? '');
   const [chatError, setChatError] = useState<string | null>(null);
   const [clockMsg, setClockMsg] = useState(settings.clockInMessage ?? DEFAULT_CLOCK_IN_MESSAGE);
@@ -231,7 +232,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const updated: AppSettings = {
       ...settings,
       workdayHours: hours,
-      clockInMessageEnabled: clockMsgOn ? undefined : false,
+      clockInMessageEnabled: clockMsgOn ? true : undefined,
       clockInChat: clockMsgOn && clockChat.trim() ? clockChat.trim() : undefined,
       clockInMessage: clockMsg.trim() && clockMsg.trim() !== DEFAULT_CLOCK_IN_MESSAGE ? clockMsg.trim() : undefined,
       googleScriptUrl: googleScriptUrl.trim(),
@@ -641,17 +642,17 @@ Your current Gemini API key is kept. Export a backup first if you want to keep y
                 <label htmlFor={`${uid}-tone`} className={LABEL}>
                   Default tone
                 </label>
-                <select
+                <Select
                   id={`${uid}-tone`}
                   value={defaultTone}
-                  onChange={(e) => setDefaultTone(e.target.value as ReportTone)}
-                  className={FIELD}
-                >
-                  <option value="casual">Casual and direct (agile standup)</option>
-                  <option value="corporate">Formal corporate (stakeholders)</option>
-                  <option value="bullet">Brief, bullets only</option>
-                  <option value="client">Client-facing (deliverables)</option>
-                </select>
+                  onChange={(v) => setDefaultTone(v as ReportTone)}
+                  options={[
+                    { value: 'casual', label: 'Casual and direct (agile standup)' },
+                    { value: 'corporate', label: 'Formal corporate (stakeholders)' },
+                    { value: 'bullet', label: 'Brief, bullets only' },
+                    { value: 'client', label: 'Client-facing (deliverables)' },
+                  ]}
+                />
               </div>
               <div>
                 <label htmlFor={`${uid}-to`} className={LABEL}>

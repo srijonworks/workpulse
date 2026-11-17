@@ -1,4 +1,5 @@
 import React, { useId, useLayoutEffect, useRef, useState } from 'react';
+import { Select } from '../ui/Select';
 import type { Project } from '../../types';
 import { activeProjectsOf } from '../../utils/projects';
 import { applyCompletion, completionState, nextSwatchColor, resolveProject } from '../../utils/projectCompletion';
@@ -168,19 +169,13 @@ export const ProjectInput: React.FC<ProjectInputProps> = ({
         className="v2-ribbon absolute left-2 top-2.5 bottom-2.5 pointer-events-none"
         style={{ backgroundColor: project?.color ?? 'var(--border-control)' }}
       />
-      <select
-        aria-label="Project"
+      <Select
+        ariaLabel="Project"
         value={project?.id ?? ''}
-        onChange={(e) => onProjectChange?.(e.target.value)}
-        className={`${CONTROL} h-11 w-full max-w-[10rem] sm:max-w-[12rem] pl-6 pr-2 cursor-pointer`}
-      >
-        {activeProjectsOf(projects).map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
-          </option>
-        ))}
-        {project && project.isArchived && <option value={project.id}>{project.name}</option>}
-      </select>
+        onChange={(v) => onProjectChange?.(v)}
+        className="h-11 w-full max-w-[10rem] sm:max-w-[12rem] pl-6 pr-2"
+        options={[...activeProjectsOf(projects).map((p) => ({ value: p.id, label: p.name })), ...(project && project.isArchived ? [{ value: project.id, label: project.name }] : [])]}
+      />
     </div>
   );
 

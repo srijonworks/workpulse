@@ -1,4 +1,6 @@
 import React, { useEffect, useId, useMemo, useState } from 'react';
+import { DatePicker } from '../../ui/DatePicker';
+import { Select } from '../../ui/Select';
 import type { BacklogTask, Project, WorkLog, Workdays } from '../../../types';
 import { addDays, localDateStr, localTimeStr } from '../../../utils/dates';
 import { filterLogs, NO_FILTERS } from '../../../utils/logFilter';
@@ -241,14 +243,7 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
             <label htmlFor={`${id}-date`} className={LABEL}>
               Day
             </label>
-            <input
-              id={`${id}-date`}
-              type="date"
-              value={selectedDay}
-              max={today}
-              onChange={(e) => e.target.value && onSelectDay(e.target.value)}
-              className="v2-input h-11 px-3 text-[length:var(--fs-body)]"
-            />
+            <DatePicker id={`${id}-date`} value={selectedDay} max={today} onChange={(v) => v && onSelectDay(v)} className="min-w-[11rem]" />
           </div>
           <button type="button" onClick={() => onSelectDay(today)} className="v2-btn min-h-11 px-4 cursor-pointer">
             Today
@@ -368,14 +363,12 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
             <label htmlFor={`${id}-p`} className={LABEL}>
               Project
             </label>
-            <select id={`${id}-p`} value={activeProject} onChange={(e) => setProjectId(e.target.value)} className={FIELD}>
-              <option value="all">All projects</option>
-              {filterProjects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            <Select
+              id={`${id}-p`}
+              value={activeProject}
+              onChange={setProjectId}
+              options={[{ value: 'all', label: 'All projects' }, ...filterProjects.map((p) => ({ value: p.id, label: p.name }))]}
+            />
           </div>
           <div className="flex justify-end gap-2">
             <SyncButton {...sync} />

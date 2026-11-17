@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Select } from './ui/Select';
 import { ModalShell } from './ui/ModalShell';
 import { plainAiMessage } from '../utils/aiErrors';
 import { IconButton } from './ui/IconButton';
@@ -212,16 +213,17 @@ export const AiStandupModal: React.FC<AiStandupModalProps> = ({
               <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1">
                 Tone of Voice:
               </label>
-              <select
+              <Select
+                ariaLabel="Tone of voice"
                 value={tone}
-                onChange={(e) => setTone(e.target.value as ReportTone)}
-                className="w-full bg-[var(--bg-subtle)] border border-[var(--border-control)] rounded-md px-3 py-1.5 text-xs text-[var(--text-main)] focus:border-[var(--accent)]"
-              >
-                <option value="casual">Casual & Direct (Team standup)</option>
-                <option value="corporate">Formal Corporate (Management)</option>
-                <option value="bullet">Brief / Bullet-only (High velocity)</option>
-                <option value="client">Client-Facing (Deliverables focus)</option>
-              </select>
+                onChange={(v) => setTone(v as ReportTone)}
+                options={[
+                  { value: 'casual', label: 'Casual & Direct (Team standup)' },
+                  { value: 'corporate', label: 'Formal Corporate (Management)' },
+                  { value: 'bullet', label: 'Brief / Bullet-only (High velocity)' },
+                  { value: 'client', label: 'Client-Facing (Deliverables focus)' },
+                ]}
+              />
             </div>
 
             <div>

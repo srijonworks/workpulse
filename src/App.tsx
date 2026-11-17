@@ -95,6 +95,7 @@ import { DiskCopyBanner } from './components/DiskCopyBanner';
 import { useHeartbeat } from './hooks/useHeartbeat';
 import { useAutoProjects } from './hooks/useAutoProjects';
 import { useAutoDay } from './hooks/useAutoDay';
+import { AdjustTimeDialog } from './components/v2/AdjustTimeDialog';
 import { useDayClose } from './hooks/useDayClose';
 import { useStandups } from './hooks/useStandups';
 import { useDelivery } from './hooks/useDelivery';
@@ -491,7 +492,7 @@ export default function App() {
     setIsClockInOpen(false);
     // Runs inside the click that clocked in, so the browser allows the new tab.
     // A clock-in that confirmed itself runs outside a click, so the browser would block the new tab: it is skipped.
-    if (firstOfDate && !auto && settingsRef.current.clockInMessageEnabled !== false) {
+    if (firstOfDate && !auto && settingsRef.current.clockInMessageEnabled === true) {
       const plan = clockInOpenPlan(settingsRef.current.clockInChat, buildClockInMessage(settingsRef.current.clockInMessage, at));
       if (plan.copy) void navigator.clipboard?.writeText(plan.copy).catch(() => {});
       window.open(plan.url, '_blank', 'noopener');
@@ -1034,6 +1035,7 @@ export default function App() {
   };
 
   const [editingTask, setEditingTask] = useState<BacklogTask | null>(null);
+  const [adjustingTask, setAdjustingTask] = useState<BacklogTask | null>(null);
   const handleSaveTaskEdit = (taskId: string, changes: { title: string; projectId: string; dueDate: string }) => {
     const updated = backlog.map((t) => (t.id === taskId ? { ...t, ...changes } : t));
     setBacklog(updated);
@@ -1649,6 +1651,7 @@ export default function App() {
     reopenToPlanned: useStableCallback((id: string) => handleReopenTask(id, 'planned')),
     deleteTask: useStableCallback(handleDeleteBacklogTask),
     editTask: useStableCallback((t: BacklogTask) => setEditingTask(t)),
+    adjustTime: useStableCallback((t: BacklogTask) => setAdjustingTask(t)),
     moveToToday: useStableCallback(handleMoveToToday),
     addLog: useStableCallback(handleAddLog),
     createProject: useStableCallback(handleAddProject),
@@ -1800,6 +1803,7 @@ export default function App() {
             onReopen={h.reopenToPlanned}
             onDeleteTask={h.deleteTask}
             onEditTask={h.editTask}
+            onAdjustTime={h.adjustTime}
             onMoveToToday={h.moveToToday}
             onPlanDay={h.planDay}
             onOpenTasks={h.openTasks}
@@ -1833,6 +1837,7 @@ export default function App() {
             onReopen={h.reopenToPlanned}
             onDeleteTask={h.deleteTask}
             onEditTask={h.editTask}
+            onAdjustTime={h.adjustTime}
             onLogSelected={h.logSelectedTasks}
             onMoveToToday={h.moveToToday}
           />
@@ -1923,6 +1928,22 @@ export default function App() {
 
       <BottomNav active={activeTab} onChange={setActiveTab} openTasks={openTasks} />
 
+      {adjustingTask && (
+        <AdjustTimeDialog
+          task={adjustingTask}
+          onClose={() => setAdjustingTask(null)}
+          onSave={(updated, message) => {
+            setAdjustingTask(null);
+            // a functional update: the running timer keeps ticking, so the change is applied to the current list
+            setBacklog((prev) => {
+              const next = prev.map((t) => (t.id === updated.id ? { ...updated, elapsedSeconds: t.stage === 'in_progress' && updated.stage === 'in_progress' ? (t.elapsedSeconds ?? 0) + (updated.adjustedSeconds ?? 0) - (t.adjustedSeconds ?? 0) : updated.elapsedSeconds } : t));
+              saveBacklog(next);
+              return next;
+            });
+            addToast(message);
+          }}
+        />
+      )}
       {editingTask && (
         <ErrorBoundary area="the edit task window" variant="dialog" onClose={() => setEditingTask(null)}>
           <EditTaskDialog task={editingTask} projects={liveProjects} onClose={() => setEditingTask(null)} onSave={handleSaveTaskEdit} />

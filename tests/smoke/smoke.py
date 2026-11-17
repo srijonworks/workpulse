@@ -407,6 +407,30 @@ def log_row(page, text):
     return page.locator("main li").filter(has=page.get_by_text(text, exact=True)).first
 
 
+def pick_date(page, trigger, iso):
+    """The date picker: open it, type the date in its field and press Enter."""
+    trigger.click()
+    dlg = page.get_by_role("dialog", name="Choose a date")
+    expect(dlg).to_be_visible()
+    box = dlg.get_by_label("Type a date")
+    box.fill(iso)
+    box.press("Enter")
+    expect(dlg).to_have_count(0)
+
+
+def picker_value(page, label_or_id):
+    """The date a date picker holds (its button carries it as data-value)."""
+    return page.evaluate("(sel) => (document.querySelector(sel) || {}).dataset?.value", label_or_id)
+
+
+def select_options(page, trigger):
+    """Opens a dropdown, reads its option labels, and closes it again."""
+    trigger.click()
+    texts = page.get_by_role("listbox").get_by_role("option").all_inner_texts()
+    page.keyboard.press("Escape")
+    return [x.strip() for x in texts]
+
+
 def row_menu(page, row, item):
     """Open the row's ⋯ menu and pick an item. Done is a visible button on the row, not a menu item."""
     if item == SEL["menu_done"]:
@@ -693,7 +717,7 @@ def tasks_screen_add(s):
     form.get_by_role("textbox", name="Task").fill("Smoke future task")
     due = p.evaluate("() => { const d = new Date(); d.setDate(d.getDate() + 2); return d.getFullYear() + '-' +"
                      " String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }")
-    form.get_by_label("Due").fill(due)
+    pick_date(p, form.get_by_label("Due"), due)
     btn(form, "Add", exact=True).click()
     p.wait_for_timeout(300)
     task = next((t for t in s.ls("workpulse_backlog") if t["title"] == "Smoke future task"), None)
@@ -735,11 +759,11 @@ def office_clock(s):
 
 @check("clock_in_whatsapp_message")
 def clock_in_whatsapp_message(s):
-    """With the setting left at its default (on), the first clock-in opens WhatsApp Web (stubbed, never loaded) with the typed message."""
+    """With the setting switched on, the first clock-in opens WhatsApp Web (stubbed, never loaded) with the typed message. By default it is off and no tab opens."""
     p = s.page
     p.context.route("https://web.whatsapp.com/**", lambda route: route.fulfill(status=200, body="stub"))
     p.evaluate("""() => { const k = 'workpulse_settings'; const v = JSON.parse(localStorage.getItem(k) || '{}');
-                          delete v.clockInMessageEnabled; /* absent = on */ localStorage.setItem(k, JSON.stringify(v)); }""")
+                          v.clockInMessageEnabled = true; localStorage.setItem(k, JSON.stringify(v)); }""")
     s.reload()
     btn(p.get_by_role("region", name=SEL["clock_band"]), SEL["clock_in"], exact=True).click()
     dlg = p.get_by_role("dialog", name=SEL["clock_in_dialog"])
@@ -803,10 +827,10 @@ def history_week(s):
     btn(p, "Yesterday", exact=True).click()
     p.wait_for_timeout(250)
     yesterday = (datetime.date.fromisoformat(today) - datetime.timedelta(days=1)).isoformat()
-    assert p.evaluate("() => document.querySelector('input[type=date]')?.value") == yesterday, "Yesterday did not move the day panel"
+    assert picker_value(p, "button[aria-haspopup=dialog][data-value]") == yesterday, "Yesterday did not move the day panel"
     btn(p, "Today", exact=True).click()
     p.wait_for_timeout(250)
-    assert p.evaluate("() => document.querySelector('input[type=date]')?.value") == today, "Today did not bring the panel back"
+    assert picker_value(p, "button[aria-haspopup=dialog][data-value]") == today, "Today did not bring the panel back"
     # Export menu
     btn(p, SEL["export"]).click()
     menu = p.get_by_role("menu")
@@ -1210,6 +1234,94 @@ def settings_automatic_day(s):
     assert saved.get("activityAutoProjects") is False, "auto projects should be off"
     assert saved.get("activityWatchFolder") == "E:\Work", saved.get("activityWatchFolder")
     assert not saved.get("activityIgnoredFolders"), "the skipped folder should be let go"
+    s.no_errors()
+
+
+@check("adjust_time_running")
+def adjust_time_running(s):
+    """A timer that was started late: Adjust time moves its start back, the difference is added and shown on the row;
+    a time later than the start is refused; a paused task's total can be set."""
+    from datetime import datetime, timezone
+    p = s.page
+    title = "Smoke started late"
+    s.ctx.clock.set_fixed_time(datetime(2026, 11, 16, 3, 5, tzinfo=timezone.utc))  # Monday 09:05 in Dhaka
+    task = {"id": "task-smoke-late", "title": title, "projectId": "proj-1", "dueDate": "2026-11-16", "completed": False,
+            "stage": "in_progress", "originalDate": "2026-11-16", "isRolledOver": False, "isRunning": True,
+            "elapsedSeconds": 1200, "startedAt": "2026-11-16T02:45:00.000Z", "segments": [{"start": "2026-11-16T02:45:00.000Z"}]}
+    # written by an init script on the next load: the page that is closing would otherwise save its own tasks over this one
+    s.ctx.add_init_script("if (!sessionStorage.getItem('seeded-late')) { sessionStorage.setItem('seeded-late', '1'); localStorage.setItem('workpulse_backlog', %s); }" % json.dumps(json.dumps([task])))
+    s.reload()
+    try:
+        row_menu(p, task_row(p, title), "Adjust time")
+    except Exception:
+        p.screenshot(path="C:/Users/DELL/AppData/Local/Temp/adjust_fail.png")
+        print("DEBUG rows:", p.evaluate("() => [...document.querySelectorAll('li')].map(l => l.textContent.slice(0,80))"))
+        raise
+    dlg = p.get_by_role("dialog", name="Adjust time")
+    expect(dlg).to_be_visible()
+    field = dlg.get_by_label("I really started at")
+    field.fill("09:30")  # later than the real start 08:45
+    btn(dlg, "Save", exact=True).click()
+    expect(dlg.get_by_role("alert")).to_be_visible()
+    field.fill("08:15")
+    expect(dlg).to_contain_text("30m will be added")
+    btn(dlg, "Save", exact=True).click()
+    expect(dlg).to_have_count(0)
+    saved = next(t for t in s.ls("workpulse_backlog") if t["id"] == "task-smoke-late")
+    assert saved["adjustedSeconds"] == 1800, saved
+    assert saved["elapsedSeconds"] >= 1200 + 1800, saved
+    assert saved["segments"][0]["start"] == "2026-11-16T02:15:00.000Z", saved["segments"]
+    expect(task_row(p, title)).to_contain_text("+30m by hand")
+    # pause it, then set the total by hand
+    btn(task_row(p, title), SEL["pause"], exact=True).click()
+    p.wait_for_timeout(300)
+    row_menu(p, task_row(p, title), "Adjust time")
+    dlg = p.get_by_role("dialog", name="Adjust time")
+    dlg.get_by_label("Hours").fill("1")
+    dlg.get_by_label("Minutes").fill("0")
+    btn(dlg, "Save", exact=True).click()
+    expect(dlg).to_have_count(0)
+    saved = next(t for t in s.ls("workpulse_backlog") if t["id"] == "task-smoke-late")
+    assert saved["elapsedSeconds"] == 3600, saved
+    s.no_errors()
+
+
+@check("fine_dropdown_and_date_picker")
+def fine_dropdown_and_date_picker(s):
+    """The app's own dropdown and date picker: the keyboard works, Escape closes only the popup, and a pick is kept."""
+    p = s.page
+    s.tab("tasks")
+    form = p.get_by_role("form", name="Add a task")
+    proj = form.get_by_label("Project")
+    first = proj.get_attribute("data-value")
+    proj.focus()
+    proj.press("ArrowDown")
+    box = p.get_by_role("listbox")
+    expect(box).to_be_visible()
+    assert box.get_by_role("option").count() >= 2, "the dropdown should list the projects"
+    proj.press("Escape")
+    p.wait_for_timeout(200)
+    assert box.count() == 0, "Escape did not close the dropdown"
+    proj.press("ArrowDown")
+    proj.press("ArrowDown")
+    proj.press("Enter")
+    p.wait_for_timeout(200)
+    assert box.count() == 0, "Enter did not close the dropdown"
+    assert proj.get_attribute("data-value") != first, "picking with the keyboard did not change the project"
+    due = form.get_by_label("Due")
+    today = s.today()
+    due.click()
+    cal = p.get_by_role("dialog", name="Choose a date")
+    expect(cal).to_be_visible()
+    expect(cal.get_by_role("gridcell").first).to_be_visible()
+    p.keyboard.press("Escape")
+    p.wait_for_timeout(200)
+    assert cal.count() == 0, "Escape did not close the calendar"
+    due.click()
+    btn(cal, "Today", exact=True).click()
+    p.wait_for_timeout(200)
+    assert cal.count() == 0, "Today did not close the calendar"
+    assert due.get_attribute("data-value") == today, "Today did not set the date"
     s.no_errors()
 
 
@@ -1882,7 +1994,7 @@ def projects_with_folder_and_trash(s):
     expect(btn(sec, "Restore HMIS", exact=True)).to_be_visible()
     assert hmis().get("trashedAt"), "trashedAt was not saved"
     s.tab("today")
-    options = p.get_by_label("Project", exact=True).first.locator("option").all_inner_texts()
+    options = select_options(p, p.get_by_label("Project", exact=True).first)
     assert "HMIS" not in options and options, f"a trashed project is still in the quick-add list: {options}"
     s.settings_section("Projects & tags")
     sec = p.locator("#settings-projects")
@@ -1892,7 +2004,7 @@ def projects_with_folder_and_trash(s):
     assert "trashedAt" not in hmis(), "Restore did not clear trashedAt"
     assert len(folders()) == 1, "the folder link was lost in the Trash"
     s.tab("today")
-    assert "HMIS" in p.get_by_label("Project", exact=True).first.locator("option").all_inner_texts(), "restored project is not offered"
+    assert "HMIS" in select_options(p, p.get_by_label("Project", exact=True).first), "restored project is not offered"
     s.settings_section("Projects & tags")
     sec = p.locator("#settings-projects")
     sec.scroll_into_view_if_needed()

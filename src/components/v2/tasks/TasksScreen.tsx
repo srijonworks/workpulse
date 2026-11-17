@@ -1,4 +1,6 @@
 import React, { useCallback, useId, useMemo, useState } from 'react';
+import { DatePicker } from '../../ui/DatePicker';
+import { Select } from '../../ui/Select';
 import type { BacklogTask, Project, TaskStage } from '../../../types';
 import { TaskRow } from '../today/TaskRow';
 import { DayBlock, plural } from './EarlierGroup';
@@ -22,6 +24,7 @@ export interface TasksScreenProps {
   onReopen(id: string): void;
   onDeleteTask(id: string): void;
   onEditTask?(task: BacklogTask): void;
+  onAdjustTime?(task: BacklogTask): void;
   /** "Write timesheet from N tasks": the ids of the selected done tasks. */
   onLogSelected(ids: string[]): void;
   /** Sets the due date of the given pending tasks to today ("Move to today", "Move all to today"). */
@@ -58,6 +61,7 @@ const TasksScreenView: React.FC<TasksScreenProps> = ({
   onReopen,
   onDeleteTask,
   onEditTask,
+  onAdjustTime,
   onLogSelected,
   onMoveToToday,
 }) => {
@@ -109,6 +113,7 @@ const TasksScreenView: React.FC<TasksScreenProps> = ({
       onReopen={onReopen}
       onDeleteTask={onDeleteTask}
       onEditTask={onEditTask}
+      onAdjustTime={onAdjustTime}
       {...extra}
     />
   );
@@ -141,27 +146,18 @@ const TasksScreenView: React.FC<TasksScreenProps> = ({
             <label htmlFor={`${id}-project`} className={LABEL}>
               Project
             </label>
-            <select id={`${id}-project`} value={projectId} onChange={(e) => setProjectDraft(e.target.value)} className={FIELD}>
-              {active.length === 0 && <option value="default">General</option>}
-              {active.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            <Select
+              id={`${id}-project`}
+              value={projectId}
+              onChange={setProjectDraft}
+              options={active.length === 0 ? [{ value: 'default', label: 'General' }] : active.map((p) => ({ value: p.id, label: p.name }))}
+            />
           </div>
           <div>
             <label htmlFor={`${id}-due`} className={LABEL}>
               Due
             </label>
-            <input
-              id={`${id}-due`}
-              type="date"
-              value={due}
-              min={today}
-              onChange={(e) => setDueDraft(e.target.value)}
-              className={`${FIELD} num`}
-            />
+            <DatePicker id={`${id}-due`} value={due} min={today} onChange={(v) => v && setDueDraft(v)} />
           </div>
           <button
             type="submit"

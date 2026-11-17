@@ -1,4 +1,6 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
+import { DatePicker } from '../ui/DatePicker';
+import { Select } from '../ui/Select';
 import { X } from 'lucide-react';
 import { ModalShell } from '../ui/ModalShell';
 import { IconButton } from '../ui/IconButton';
@@ -185,24 +187,20 @@ const LogForm: React.FC<Omit<LogFormDialogProps, 'isOpen'>> = ({ projects, tags,
               <label htmlFor={`${id}-project`} className={LABEL}>
                 Project
               </label>
-              <select
+              <Select
                 id={`${id}-project`}
                 value={projectId}
-                onChange={(e) => {
-                  if (e.target.value === NEW_PROJECT) setAddingProject(true);
-                  else setProjectId(e.target.value);
+                onChange={(v) => {
+                  if (v === NEW_PROJECT) setAddingProject(true);
+                  else setProjectId(v);
                 }}
-                className={FIELD}
-              >
-                {keepOld && <option value={projectId}>{current?.name ?? editing?.projectName ?? 'General'}</option>}
-                {!projectId && <option value="">General</option>}
-                {active.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-                <option value={NEW_PROJECT}>New project…</option>
-              </select>
+                options={[
+                  ...(keepOld ? [{ value: projectId, label: current?.name ?? editing?.projectName ?? 'General' }] : []),
+                  ...(!projectId ? [{ value: '', label: 'General' }] : []),
+                  ...active.map((p) => ({ value: p.id, label: p.name })),
+                  { value: NEW_PROJECT, label: 'New project…' },
+                ]}
+              />
             </div>
             <div>
               <label htmlFor={`${id}-mins`} className={LABEL}>
@@ -323,7 +321,7 @@ const LogForm: React.FC<Omit<LogFormDialogProps, 'isOpen'>> = ({ projects, tags,
               <label htmlFor={`${id}-date`} className={LABEL}>
                 Date
               </label>
-              <input id={`${id}-date`} type="date" value={date} onChange={(e) => setDate(e.target.value)} className={`num ${FIELD}`} />
+              <DatePicker id={`${id}-date`} value={date} onChange={(v) => v && setDate(v)} />
             </div>
             <div>
               <label htmlFor={`${id}-time`} className={LABEL}>

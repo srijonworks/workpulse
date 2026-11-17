@@ -1,4 +1,6 @@
 import React, { useId, useState } from 'react';
+import { DatePicker } from '../ui/DatePicker';
+import { Select } from '../ui/Select';
 import { ModalShell } from '../ui/ModalShell';
 import type { BacklogTask, Project } from '../../types';
 
@@ -55,20 +57,18 @@ export const EditTaskDialog: React.FC<Props> = ({ task, projects, onClose, onSav
           <label htmlFor={`${id}-project`} className={LABEL}>
             Project
           </label>
-          <select id={`${id}-project`} value={projectId} onChange={(e) => setProjectId(e.target.value)} className={FIELD}>
-            {!options.some((p) => p.id === projectId) && <option value={projectId}>No project</option>}
-            {options.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+          <Select
+            id={`${id}-project`}
+            value={projectId}
+            onChange={setProjectId}
+            options={[...(options.some((p) => p.id === projectId) ? [] : [{ value: projectId, label: 'No project' }]), ...options.map((p) => ({ value: p.id, label: p.name }))]}
+          />
         </div>
         <div>
           <label htmlFor={`${id}-date`} className={LABEL}>
             Date
           </label>
-          <input id={`${id}-date`} type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={FIELD} />
+          <DatePicker id={`${id}-date`} value={dueDate} onChange={(v) => v && setDueDate(v)} />
         </div>
         <div className="mt-1 flex justify-end gap-2">
           <button

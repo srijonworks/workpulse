@@ -53,6 +53,8 @@ export interface BacklogTask {
   synthesizedAt?: string;
   // Seconds of this task's tracked time already written into a log (undefined = nothing yet).
   loggedSeconds?: number;
+  // Seconds added (or taken away, negative) by hand with "Adjust time": a timer started late, or a total corrected. Shown on the row.
+  adjustedSeconds?: number;
   // Each stretch the timer ran (ISO UTC). The last one is open (no `end`) while the task runs.
   segments?: { start: string; end?: string }[];
   // True when the task was added from the phone page (it arrived through the Sheet inbox).
@@ -131,7 +133,7 @@ export interface AppSettings {
   lastProjectId?: string;
   // Length of the workday in hours, for the office clock. Absent = 8.
   workdayHours?: number;
-  // Open WhatsApp Web with a typed "arrived at office" message after the first clock-in of a day. Absent = on; false = off.
+  // Open WhatsApp Web with a typed "arrived at office" message after the first clock-in of a day. Absent = off; true = on.
   clockInMessageEnabled?: boolean;
   // The message; {time} is the clock-in time. Absent or empty = "I've arrived at office at {time}".
   clockInMessage?: string;

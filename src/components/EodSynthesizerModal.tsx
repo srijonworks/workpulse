@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Select } from './ui/Select';
 import { ModalShell } from './ui/ModalShell';
 import { plainAiMessage } from '../utils/aiErrors';
 import { requestJson } from '../utils/net/http';
@@ -543,17 +544,18 @@ export const EodPanel: React.FC<EodPanelProps> = ({
                         {/* Status & Duration Controls */}
                         <div className="flex items-center gap-2 text-xs">
                           {/* Fine-tune Status Picker */}
-                          <select
+                          <Select
+                            inline
+                            compact
+                            ariaLabel="Status"
                             value={item.status}
-                            onChange={(e) =>
-                              handleUpdateItem(item.id, 'status', e.target.value as TaskStatus)
-                            }
-                            className="px-2.5 py-1 bg-[var(--bg-subtle)] border border-[var(--border-control)] rounded-[var(--radius-btn)] text-xs text-[var(--text-main)] font-semibold cursor-pointer"
-                          >
-                            <option value="completed">Completed</option>
-                            <option value="in_progress">In Progress</option>
-                            <option value="blocked">Blocked</option>
-                          </select>
+                            onChange={(v) => handleUpdateItem(item.id, 'status', v as TaskStatus)}
+                            options={[
+                              { value: 'completed', label: 'Completed' },
+                              { value: 'in_progress', label: 'In Progress' },
+                              { value: 'blocked', label: 'Blocked' },
+                            ]}
+                          />
 
                           {/* Duration Input */}
                           <div className="flex items-center gap-1 bg-[var(--bg-subtle)] border border-[var(--border-app)] rounded-[var(--radius-btn)] px-2 py-1">

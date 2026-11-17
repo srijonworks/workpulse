@@ -179,7 +179,11 @@ export const ClockBand: React.FC<ClockBandProps> = ({
       const overs = record ? buildOvers(record, hours, tasks, projects, now) : [];
       const label = `${SMALL} font-semibold uppercase tracking-[0.12em] text-[var(--band-muted)] mb-1.5`;
       wide = (
-        <div className="hidden md:grid grid-cols-[auto_auto_1fr_auto] items-center gap-8 lg:gap-12 px-6 lg:px-8 pt-[18px] pb-[22px]">
+        <div className="hidden md:grid grid-cols-[auto_auto_auto_1fr_auto] items-center gap-8 lg:gap-12 px-6 lg:px-8 pt-[18px] pb-[22px]">
+          <div>
+            <div className={label}>In</div>
+            <div className={BIG}>{hhmm(s.clockInMs ?? now)}</div>
+          </div>
           <div>
             <div className={label}>Now</div>
             <div className={`${BIG} ${tone}`}>{formatClock(now)}</div>
