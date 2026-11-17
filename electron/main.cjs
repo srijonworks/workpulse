@@ -43,6 +43,9 @@ function showStartError(err) {
   app.quit();
 }
 
+// One stable identity for the taskbar, so a pinned icon and the running window are the same item (and keep the suitcase).
+if (process.platform === 'win32') app.setAppUserModelId('local.workpulse.desktop');
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
