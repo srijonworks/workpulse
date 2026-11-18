@@ -1,6 +1,7 @@
 import type { BacklogTask, Project, WorkLog, Workdays } from '../types';
 import { addDays, localDateOfIso, localTimeStr, parseLocalDate } from './dates';
 import { logsToCsv } from './exportLogs';
+import { filterLogs, NO_FILTERS } from './logFilter';
 import { segmentSecondsInRange } from './segments';
 
 // What History's day panel shows for one local date. Pure: no React, no window.
@@ -106,4 +107,73 @@ export function dayToMarkdown(s: DaySummary, projects: Project[], standup?: stri
     : `Nothing logged.\n`;
   if (standup?.trim()) md += `\n## Standup\n${standup.trim()}\n`;
   return md;
+}
+
+// ---- A range of days (History lists one or many days the same way) ----
+
+export interface RangeInput {
+  from: string;
+  to: string;
+  today: string;
+  nowMs: number;
+  logs: WorkLog[];
+  workdays: Workdays;
+  backlog: BacklogTask[];
+  /** Words to find in logs (description, project, tags) and done-task titles. '' = no search. */
+  query?: string;
+  /** 'all' or a project id: keeps only that project's logs and tasks. */
+  projectId?: string;
+}
+
+export interface RangeSummary {
+  /** Days that have something to show, newest first. Logs and tasks are already filtered by the search and project. */
+  days: DaySummary[];
+  logCount: number;
+  taskCount: number;
+  loggedMinutes: number;
+}
+
+const isDone = (t: BacklogTask) => (t.completed === true || t.stage === 'done') && !!t.completedAt;
+
+/**
+ * Everything on record between two dates (both included), one summary per day that has a clock-in, a log or a finished task.
+ * With a search or a project, days with no matching log or task are left out.
+ */
+export function summarizeRange(input: RangeInput): RangeSummary {
+  const { from, to, today, nowMs } = input;
+  const query = (input.query ?? '').trim().toLowerCase();
+  const projectId = input.projectId && input.projectId !== 'all' ? input.projectId : null;
+  const filtering = query !== '' || projectId !== null;
+
+  const logs = filterLogs(input.logs, { ...NO_FILTERS, query, projectId: projectId ?? 'all' }, today);
+  const logsByDate = new Map<string, WorkLog[]>();
+  for (const l of logs) logsByDate.set(l.date, [...(logsByDate.get(l.date) ?? []), l]);
+
+  const done = input.backlog.filter(
+    (t) => isDone(t) && (!projectId || t.projectId === projectId) && (query === '' || t.title.toLowerCase().includes(query)),
+  );
+  const dates = new Set<string>(logsByDate.keys());
+  for (const t of done) dates.add(localDateOfIso(t.completedAt as string));
+  if (!filtering) for (const d of Object.keys(input.workdays)) dates.add(d);
+
+  const days: DaySummary[] = [];
+  for (const date of [...dates].filter((d) => d >= from && d <= to).sort((a, b) => b.localeCompare(a))) {
+    const s = summarizeDay({ date, today, nowMs, logs: logsByDate.get(date) ?? [], workdays: input.workdays, backlog: input.backlog });
+    const tasks = done.filter((t) => localDateOfIso(t.completedAt as string) === date);
+    const day = { ...s, doneTasks: tasks };
+    if (filtering && day.logs.length === 0 && tasks.length === 0) continue;
+    days.push(day);
+  }
+  return {
+    days,
+    logCount: days.reduce((n, d) => n + d.logs.length, 0),
+    taskCount: days.reduce((n, d) => n + d.doneTasks.length, 0),
+    loggedMinutes: days.reduce((n, d) => n + d.loggedMinutes, 0),
+  };
+}
+
+/** The range as Markdown: each day with its times, done tasks, logs and saved standup. */
+export function rangeToMarkdown(days: DaySummary[], projects: Project[], from: string, to: string, standupFor?: (date: string) => string | undefined): string {
+  const body = [...days].reverse().map((d) => dayToMarkdown(d, projects, standupFor?.(d.date))).join('\n---\n\n');
+  return from === to ? body : `# Work log ${from} to ${to}\n\n${body}`;
 }

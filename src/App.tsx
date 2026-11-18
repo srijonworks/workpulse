@@ -158,7 +158,7 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<AppNavTab>('today');
   // The day shown in History's day panel; kept here so it survives switching tabs.
-  const [historyDay, setHistoryDay] = useState<string>(() => localDateStr());
+  const [historyRangeState, setHistoryRange] = useState<{ from: string; to: string }>(() => ({ from: localDateStr(), to: localDateStr() }));
 
   // Dialogs
   const [isAiStandupOpen, setIsAiStandupOpen] = useState(false);
@@ -1713,6 +1713,8 @@ export default function App() {
       if (!isSyncingSheet) handleSyncGoogleSheet();
     }),
     historyFocusHandled: useStableCallback(() => setHistoryFocus(null)),
+    historySelectDay: useStableCallback((d: string) => setHistoryRange({ from: d, to: d })),
+    historySelectRange: useStableCallback((from: string, to: string) => setHistoryRange({ from, to })),
     confirmEod: useStableCallback(handleConfirmEodPush),
     syncForEndDay: useStableCallback(handleSyncForEndDay),
     pauseTask: useStableCallback(handlePauseTask),
@@ -1873,8 +1875,10 @@ export default function App() {
             projects={liveProjects}
             workdays={workdays}
             backlog={backlog}
-            selectedDay={historyDay}
-            onSelectDay={setHistoryDay}
+            selectedDay={historyRangeState.from}
+            rangeEnd={historyRangeState.to}
+            onSelectDay={h.historySelectDay}
+            onSelectRange={h.historySelectRange}
             standupFor={(date) => standups.find((s) => s.id === `day:${date}`)?.text}
             canRewriteStandup={(date) => { const s = standups.find((x) => x.id === `day:${date}`); return !!s && needsRewrite(s); }}
             onRewriteStandup={rewrite}

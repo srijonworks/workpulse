@@ -823,7 +823,7 @@ def history_week(s):
     panel = p.get_by_role("region", name=re.compile(r"^Today"))
     expect(panel).to_be_visible()
     assert panel.get_by_role("checkbox").count() == len(todays), "the picked day shows the wrong logs"
-    expect(panel).to_contain_text("Worked")
+    expect(panel).to_contain_text("logged")
     # the date field and Yesterday move the panel to another day
     btn(p, "Yesterday", exact=True).click()
     p.wait_for_timeout(250)
@@ -845,7 +845,8 @@ def history_week(s):
 
 @check("history_date_range")
 def history_date_range(s):
-    """One picked day shows only that day; an end date lists every log in the range, and Export follows it."""
+    """Dates, search, project and export sit together on top. One date shows only that date; From and To list every day in the
+    range with its logs and done tasks; Export follows what is listed; search stays inside the dates unless told otherwise."""
     p = s.page
     quick_log(s, "Smoke range today")
     logs = s.ls("workpulse_logs")
@@ -854,22 +855,31 @@ def history_date_range(s):
     days = {n: s.day(-n) for n in (1, 3, 5)}
     for n, d in days.items():
         logs.append(dict(base, id=f"log-17000000000{n}-rng", date=d, description=f"Smoke range day {n}"))
+    done_at = f"{days[3]}T08:00:00.000Z"
+    task = {"id": "task-1700000000000-rng", "title": "Smoke range task", "projectId": "proj-1", "dueDate": days[3],
+            "originalDate": days[3], "isRolledOver": False, "completed": True, "stage": "done", "completedAt": done_at}
     s.ctx.add_init_script(
         "try{ if(!sessionStorage.getItem('smoke_range')){ sessionStorage.setItem('smoke_range','1');"
-        " localStorage.setItem('workpulse_logs', %s) } }catch(e){}" % json.dumps(json.dumps(logs)))
+        " localStorage.setItem('workpulse_logs', %s); localStorage.setItem('workpulse_backlog', %s) } }catch(e){}"
+        % (json.dumps(json.dumps(logs)), json.dumps(json.dumps([task]))))
     s.reload()
     s.tab("history")
     main = p.locator("main")
-    # one day: today's log only, nothing from other days below it
-    expect(main.get_by_text("Smoke range today")).to_be_visible(timeout=5000)
+    # the controls come first: dates, search, project, export all above the list
+    bar = p.get_by_role("region", name="Choose what to show")
+    expect(bar.get_by_label("From")).to_be_visible(timeout=5000)
+    expect(bar.get_by_label("To", exact=True)).to_be_visible()
+    expect(bar.get_by_label("Search", exact=True)).to_be_visible()
+    expect(btn(bar, SEL["export"])).to_be_visible()
+    # one date: that date only
+    expect(main.get_by_text("Smoke range today")).to_be_visible()
     expect(main.get_by_text("Smoke range day 1")).to_have_count(0)
-    expect(main.get_by_text("Showing", exact=False).first).to_be_visible()
-    # a range: From three days back to today
+    # a range: From three days back, To today; logs and the done task are listed together under their days
     pick_date(p, p.locator("button[aria-haspopup=dialog][data-value]").nth(0), days[3])
-    pick_date(p, p.locator("button[aria-haspopup=dialog]").nth(1), s.day(0))
     expect(main.get_by_text("Smoke range day 1")).to_be_visible(timeout=5000)
     expect(main.get_by_text("Smoke range day 3")).to_be_visible()
     expect(main.get_by_text("Smoke range today")).to_be_visible()
+    expect(main.get_by_text("Smoke range task")).to_be_visible()
     expect(main.get_by_text("Smoke range day 5")).to_have_count(0)  # before the range
     # Export follows the range
     btn(p, SEL["export"]).click()
@@ -878,7 +888,15 @@ def history_date_range(s):
     csv_text = open(dl.value.path(), encoding="utf-8").read()
     assert "Smoke range day 1" in csv_text and "Smoke range day 3" in csv_text, "the export is missing logs of the range"
     assert "Smoke range day 5" not in csv_text, "the export has a log from outside the range"
-    # Today puts it back to one day
+    # a search stays inside the dates ...
+    bar.get_by_label("Search", exact=True).fill("day 5")
+    expect(main.get_by_text("Smoke range day 5")).to_have_count(0)
+    # ... until "all dates" is ticked
+    bar.get_by_label(re.compile(r"look at all dates")).check()
+    expect(main.get_by_text("Smoke range day 5")).to_be_visible(timeout=3000)
+    bar.get_by_label(re.compile(r"look at all dates")).uncheck()
+    bar.get_by_label("Search", exact=True).fill("")
+    # Today puts it back to one date
     btn(p, "Today", exact=True).click()
     expect(main.get_by_text("Smoke range day 1")).to_have_count(0)
     s.no_errors()

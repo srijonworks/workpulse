@@ -1,7 +1,7 @@
 process.env.TZ = 'Asia/Dhaka';
 import { describe, expect, it } from 'vitest';
 import type { BacklogTask, Project, WorkLog } from '../types';
-import { dayRangeMs, dayToCsv, dayToMarkdown, hm, parseDateQuery, summarizeDay } from './historyDay';
+import { dayRangeMs, dayToCsv, dayToMarkdown, hm, parseDateQuery, rangeToMarkdown, summarizeDay, summarizeRange } from './historyDay';
 
 const TODAY = '2026-11-17';
 const log = (o: Partial<WorkLog> = {}): WorkLog =>
@@ -93,5 +93,53 @@ describe('exports', () => {
   it('csv holds only the day logs; hm formats', () => {
     expect(dayToCsv(s).trim().split('\n').length).toBe(2);
     expect(hm(3700)).toBe('1:01');
+  });
+});
+
+describe('summarizeRange', () => {
+  const logs = [
+    log({ id: 'a', date: '2026-11-14', description: 'Old invoice work', durationMinutes: 30 }),
+    log({ id: 'b', date: '2026-11-16', description: 'Fixed the login', durationMinutes: 60 }),
+    log({ id: 'c', date: '2026-11-16', projectId: 'p2', projectName: 'Other', description: 'Other thing', durationMinutes: 15 }),
+  ];
+  const tasks = [task({ id: 't1', title: 'Fix login bug', completedAt: '2026-11-16T05:00:00.000Z' }), task({ id: 't2', title: 'Old task', completedAt: '2026-11-10T05:00:00.000Z' })];
+  const base = { today: TODAY, nowMs: Date.parse('2026-11-17T06:00:00.000Z'), logs, workdays: {}, backlog: tasks };
+
+  it('lists the days inside the range newest first, with their logs and done tasks together', () => {
+    const r = summarizeRange({ ...base, from: '2026-11-14', to: '2026-11-17' });
+    expect(r.days.map((d) => d.date)).toEqual(['2026-11-16', '2026-11-14']);
+    expect(r.days[0].logs.map((l) => l.id)).toEqual(['b', 'c']);
+    expect(r.days[0].doneTasks.map((t) => t.id)).toEqual(['t1']);
+    expect(r).toMatchObject({ logCount: 3, taskCount: 1, loggedMinutes: 105 });
+  });
+
+  it('one date shows only that date', () => {
+    const r = summarizeRange({ ...base, from: '2026-11-16', to: '2026-11-16' });
+    expect(r.days.map((d) => d.date)).toEqual(['2026-11-16']);
+  });
+
+  it('keeps days that only have a clock-in, but not when searching', () => {
+    const workdays = { '2026-11-15': { clockIn: '2026-11-15T03:00:00.000Z', clockOut: '2026-11-15T11:00:00.000Z' } };
+    expect(summarizeRange({ ...base, workdays, from: '2026-11-14', to: '2026-11-17' }).days.map((d) => d.date)).toContain('2026-11-15');
+    expect(summarizeRange({ ...base, workdays, query: 'login', from: '2026-11-14', to: '2026-11-17' }).days.map((d) => d.date)).toEqual(['2026-11-16']);
+  });
+
+  it('a search and a project filter both logs and tasks', () => {
+    const r = summarizeRange({ ...base, query: 'login', from: '2026-11-01', to: '2026-11-17' });
+    expect(r.days[0].logs.map((l) => l.id)).toEqual(['b']);
+    expect(r.days[0].doneTasks.map((t) => t.id)).toEqual(['t1']);
+    const p = summarizeRange({ ...base, projectId: 'p2', from: '2026-11-01', to: '2026-11-17' });
+    expect(p).toMatchObject({ logCount: 1, taskCount: 0 });
+  });
+});
+
+describe('rangeToMarkdown', () => {
+  it('joins the days oldest first under one heading, and a single day has none', () => {
+    const base = { today: TODAY, nowMs: Date.parse('2026-11-17T06:00:00.000Z'), workdays: {}, backlog: [] as BacklogTask[] };
+    const r = summarizeRange({ ...base, logs: [log({ id: 'a', date: '2026-11-14' }), log({ id: 'b', date: '2026-11-16' })], from: '2026-11-14', to: '2026-11-16' });
+    const md = rangeToMarkdown(r.days, projects, '2026-11-14', '2026-11-16');
+    expect(md.startsWith('# Work log 2026-11-14 to 2026-11-16')).toBe(true);
+    expect(md.indexOf('# 2026-11-14')).toBeLessThan(md.indexOf('# 2026-11-16'));
+    expect(rangeToMarkdown(r.days.slice(0, 1), projects, '2026-11-16', '2026-11-16').startsWith('# 2026-11-16')).toBe(true);
   });
 });
