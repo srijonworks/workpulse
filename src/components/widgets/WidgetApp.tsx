@@ -19,7 +19,7 @@ export const WidgetApp: React.FC<{ kind: WidgetKind }> = ({ kind }) => {
     if (!snap) return;
     const theme = normalizeTheme(snap.theme);
     document.documentElement.setAttribute('data-theme', theme);
-    document.documentElement.setAttribute('data-mode', theme === 'console' ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-mode', theme === 'console' || theme === 'nightdesk' ? 'dark' : 'light');
   }, [snap]);
 
   return kind === 'time' ? <TimeWidget snap={snap} /> : <TasksWidget snap={snap} />;

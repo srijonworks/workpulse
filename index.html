@@ -12,18 +12,18 @@
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=Libre+Franklin:wght@400..800&family=Courier+Prime:wght@400;700&family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&family=Noto+Sans+Bengali:wght@400..700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=Libre+Franklin:wght@400..800&family=Courier+Prime:wght@400;700&family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&family=Newsreader:opsz,wght@6..72,400..600&family=Hanken+Grotesk:wght@400..700&family=DM+Mono:wght@400;500&family=Noto+Sans+Bengali:wght@400..700&display=swap" rel="stylesheet" />
     <script>
       // Apply the saved theme before the first paint so there is no flash of the default theme.
       // Mirrors normalizeTheme (src/utils/theme.ts): old ids map to the three v2 themes, anything else is chase.
-      // Console is the dark theme; the other two are light.
+      // Console and Night Desk are dark; the other two are light.
       (function () {
         try {
           var s = JSON.parse(localStorage.getItem('workpulse_settings') || '{}');
-          var map = { chase: 'chase', timecard: 'timecard', console: 'console', modern: 'chase', compact: 'chase', minimalist: 'timecard', matrix: 'console' };
+          var map = { chase: 'chase', timecard: 'timecard', console: 'console', nightdesk: 'nightdesk', modern: 'chase', compact: 'chase', minimalist: 'timecard', matrix: 'console' };
           var theme = (s && typeof s.theme === 'string' && Object.prototype.hasOwnProperty.call(map, s.theme)) ? map[s.theme] : 'chase';
           document.documentElement.setAttribute('data-theme', theme);
-          document.documentElement.setAttribute('data-mode', theme === 'console' ? 'dark' : 'light');
+          document.documentElement.setAttribute('data-mode', theme === 'console' || theme === 'nightdesk' ? 'dark' : 'light');
         } catch (e) {
           document.documentElement.setAttribute('data-theme', 'chase');
           document.documentElement.setAttribute('data-mode', 'light');

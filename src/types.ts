@@ -71,7 +71,7 @@ export interface Project {
 }
 
 // The three themes. Older stored ids (modern, compact, minimalist, matrix) are mapped by normalizeTheme.
-export type ThemeId = 'chase' | 'timecard' | 'console';
+export type ThemeId = 'chase' | 'timecard' | 'console' | 'nightdesk';
 
 export type ReportFormat = 'whatsapp' | 'slack' | 'executive';
 

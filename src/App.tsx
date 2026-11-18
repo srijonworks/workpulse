@@ -314,7 +314,7 @@ export default function App() {
     if (!dataLoaded) return;
     const theme = normalizeTheme(settings.theme);
     document.documentElement.setAttribute('data-theme', theme);
-    document.documentElement.setAttribute('data-mode', theme === 'console' ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-mode', theme === 'console' || theme === 'nightdesk' ? 'dark' : 'light');
     document.documentElement.removeAttribute('data-crt');
   }, [dataLoaded, settings.theme]);
 

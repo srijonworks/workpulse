@@ -30,6 +30,7 @@ const PAD: Record<ThemeId, string> = {
   chase: 'px-4 md:px-6 lg:px-8 py-4',
   timecard: 'px-4 md:px-6 lg:px-8 py-3.5',
   console: 'px-4 md:px-6 py-2.5',
+  nightdesk: 'px-4 md:px-6 py-2.5',
 };
 
 const SMALL = 'text-[length:var(--fs-small)]';
@@ -95,8 +96,8 @@ export const ClockBand: React.FC<ClockBandProps> = ({
   const now = useNow(1000);
   const s = clockState(record, hours, now);
   const pad = PAD[theme];
-  // --clock colours pass AA only as large figures; Console's figures are body size, so they stay ink there.
-  const tone = theme === 'console' ? '' : 'text-[var(--clock)]';
+  // --clock colours pass AA only as large figures; Console and Night Desk figures are body size, so they stay ink there.
+  const tone = theme === 'console' || theme === 'nightdesk' ? '' : 'text-[var(--clock)]';
 
   let body: React.ReactNode;
 

@@ -2,10 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { normalizeTheme, THEMES } from './theme';
 
 describe('normalizeTheme', () => {
-  it('keeps the three v2 themes', () => {
+  it('keeps the v2 themes', () => {
     expect(normalizeTheme('chase')).toBe('chase');
     expect(normalizeTheme('timecard')).toBe('timecard');
     expect(normalizeTheme('console')).toBe('console');
+    expect(normalizeTheme('nightdesk')).toBe('nightdesk');
   });
 
   it('maps the four old themes', () => {
@@ -24,10 +25,11 @@ describe('normalizeTheme', () => {
 });
 
 describe('THEMES', () => {
-  it('lists the three themes in order with their names', () => {
-    expect(THEMES.map(t => t.id)).toEqual(['chase', 'timecard', 'console']);
-    expect(THEMES.map(t => t.name)).toEqual(['The Chase', 'Time Card', 'Graphite Console']);
+  it('lists the themes in order with their names', () => {
+    expect(THEMES.map(t => t.id)).toEqual(['chase', 'timecard', 'console', 'nightdesk']);
+    expect(THEMES.map(t => t.name)).toEqual(['The Chase', 'Time Card', 'Graphite Console', 'Night Desk']);
+    expect(THEMES.find(t => t.id === 'nightdesk')?.dark).toBe(true);
     expect(THEMES.find(t => t.id === 'console')?.dark).toBe(true);
-    expect(THEMES.filter(t => t.dark)).toHaveLength(1);
+    expect(THEMES.filter(t => t.dark)).toHaveLength(2);
   });
 });

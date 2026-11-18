@@ -161,7 +161,7 @@ input[type='radio'] {
 }
 
 /* =========================================================================
-   V2 THEMES: The Chase, Time Card, Graphite Console.
+   V2 THEMES: The Chase, Time Card, Graphite Console, Night Desk.
    Each block sets every token itself (status colours included), so it does not depend on
    data-mode (index.html and App set data-mode to dark for Console, light otherwise, for the
    `dark:` variant and native controls).
@@ -345,11 +345,65 @@ input[type='radio'] {
   color-scheme: dark;
 }
 
+/* Night Desk: soft graphite, paper-white text, amber only for the running timer. Low glare. */
+[data-theme="nightdesk"] {
+  --bg-app: #1c2224;
+  --bg-surface: #242b2e;
+  --bg-surface-elevated: #2b3336;
+  --bg-subtle: #2b3336;
+  --bg-subtle-hover: #333c40;
+  --border-app: #323b3e;
+  --border-control: #6c797d;
+  --border-focus: #f0b45a;
+  --text-main: #e8ece9;
+  --text-muted: #a2b0b3;
+  --text-subtle: #a2b0b3;
+  --accent: #e8ece9;
+  --accent-hover: #ffffff;
+  --accent-text: #f0b45a;
+  --on-accent: #14120d;
+  --radius-card: 10px;
+  --radius-btn: 8px;
+  --font-display: 'Newsreader', Georgia, 'Noto Sans Bengali', serif;
+  --font-body: 'Hanken Grotesk', 'Noto Sans Bengali', system-ui, sans-serif;
+  --font-mono: 'DM Mono', 'Noto Sans Bengali', ui-monospace, monospace;
+  --font-num: 'DM Mono', 'Noto Sans Bengali', ui-monospace, monospace;
+  --num-stretch: 100%;
+  --band-bg: #1c2224;
+  --band-ink: #e8ece9;
+  --band-muted: #a2b0b3;
+  --band-line: #323b3e;
+  --band-edge: 1px solid #323b3e;
+  --band-focus: #f0b45a;
+  --clock-calm: #a2b0b3;
+  --clock-near: #f0b45a;
+  --clock-due: #e59a63;
+  --clock-over: #dd7f78;
+  --fs-body: 15px;
+  --fs-small: 13px;
+  --fs-num: 15px;
+  --row-pad: 14px;
+  --success: #86c9b4;
+  --warning: #f0b45a;
+  --danger: #e8867d;
+  --info: #8fb4e8;
+  --success-solid: #047857;
+  --success-solid-hover: #065f46;
+  --warning-solid: #b45309;
+  --warning-solid-hover: #92400e;
+  --danger-solid: #be123c;
+  --danger-solid-hover: #9f1239;
+  --info-solid: #1d4ed8;
+  --info-solid-hover: #1e40af;
+  color-scheme: dark;
+}
+
 /* Phones: the band numerals step down. */
 @media (max-width: 639px) {
   [data-theme="chase"] { --fs-num: 40px; }
   [data-theme="timecard"] { --fs-num: 28px; }
   [data-theme="console"] { --fs-num: 15px; }
+  [data-theme="nightdesk"] { --fs-num: 15px; }
 }
 
 /* Numerals: the theme's figure face, at its stretch, with even-width digits. */
@@ -399,12 +453,14 @@ input[type='radio'] {
 .v2-tab[aria-current="page"] { color: var(--band-ink); }
 [data-theme="chase"] .v2-tab[aria-current="page"] { background: rgb(255 255 255 / 0.08); }
 [data-theme="timecard"] .v2-tab[aria-current="page"] { box-shadow: inset 0 -3px 0 var(--clock-over); }
-[data-theme="console"] .v2-tab[aria-current="page"] {
+[data-theme="console"] .v2-tab[aria-current="page"],
+[data-theme="nightdesk"] .v2-tab[aria-current="page"] {
   background: var(--bg-surface);
   box-shadow: inset 0 0 0 1px var(--band-line);
 }
 [data-theme="timecard"] .v2-brand { text-transform: uppercase; letter-spacing: 0.14em; }
 [data-theme="console"] .v2-brand { text-transform: lowercase; }
+[data-theme="nightdesk"] .v2-brand { font-family: var(--font-display); font-weight: 500; font-size: 20px; }
 
 /* V2 screens (Today, and the rows Tasks/History/End my day reuse). One layout; the theme decides
    the dressing: Chase paper cards with a 1px line, Time Card ruled rows with no card, Console
@@ -470,7 +526,8 @@ input[type='radio'] {
   min-width: 0;
 }
 [data-theme="timecard"] .v2-head-group,
-[data-theme="console"] .v2-head-group { justify-content: space-between; }
+[data-theme="console"] .v2-head-group,
+[data-theme="nightdesk"] .v2-head-group { justify-content: space-between; }
 [data-theme="timecard"] .v2-head {
   justify-content: space-between;
   margin-bottom: 0;
@@ -489,6 +546,16 @@ input[type='radio'] {
   color: var(--text-muted);
 }
 [data-theme="console"] .v2-head-meta { font-family: var(--font-num); }
+/* Night Desk: serif headings in sentence case, no tracked capitals. */
+[data-theme="nightdesk"] .v2-head {
+  justify-content: space-between;
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+[data-theme="nightdesk"] .v2-head-meta { font-family: var(--font-num); }
+[data-theme="nightdesk"] .v2-head.v2-head-label { font-family: var(--font-body); font-size: var(--fs-small); font-weight: 600; letter-spacing: 0; }
 /* Section heads inside a dialog drop to label scale, so the dialog title outranks them. */
 .v2-head.v2-head-label {
   font-size: var(--fs-small);
@@ -501,11 +568,13 @@ input[type='radio'] {
 .v2-ribbon { width: 6px; border-radius: 3px; flex-shrink: 0; }
 [data-theme="timecard"] .v2-ribbon { border-radius: 0; }
 [data-theme="console"] .v2-ribbon { border-radius: 2px; }
+[data-theme="nightdesk"] .v2-ribbon { width: 4px; border-radius: 2px; }
 
 /* The running task's row. */
 .v2-running { background: #fff8e1; }
 [data-theme="timecard"] .v2-running { background: #fff7dc; }
 [data-theme="console"] .v2-running { background: #1e2a25; }
+[data-theme="nightdesk"] .v2-running { background: #2b3336; }
 
 /* Row buttons: outlined; the running row's button is filled with ink. */
 .v2-btn {
@@ -528,9 +597,12 @@ input[type='radio'] {
 }
 [data-theme="timecard"] .v2-btn-strong,
 [data-theme="timecard"] .v2-btn-strong:hover:not(:disabled) { background: var(--text-main); color: var(--bg-surface); }
-[data-theme="console"] .v2-btn { font-weight: 500; background: transparent; }
+[data-theme="console"] .v2-btn,
+[data-theme="nightdesk"] .v2-btn { font-weight: 500; background: transparent; }
 [data-theme="console"] .v2-btn-strong,
-[data-theme="console"] .v2-btn-strong:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+[data-theme="console"] .v2-btn-strong:hover:not(:disabled),
+[data-theme="nightdesk"] .v2-btn-strong,
+[data-theme="nightdesk"] .v2-btn-strong:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 
 /* Quick-add inputs. */
 .v2-input {

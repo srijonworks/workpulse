@@ -87,7 +87,7 @@ SEL = {
     "export_items": ("Download CSV", "Copy as Markdown", "Print"),
     # Settings
     "theme_group": "Theme",
-    "theme_tiles": {"chase": "The Chase", "timecard": "Time Card", "console": "Graphite Console"},
+    "theme_tiles": {"chase": "The Chase", "timecard": "Time Card", "console": "Graphite Console", "nightdesk": "Night Desk"},
     "workday_hours": "Hours in your workday",
     "settings_save": "Save All Settings",
     "settings_nav": "Settings sections",
@@ -106,7 +106,7 @@ SEL = {
 # check name -> reason it is expected to fail
 EXPECTED_FAIL = {}
 
-THEMES = ["chase", "timecard", "console"]
+THEMES = ["chase", "timecard", "console", "nightdesk"]
 SCREENS = ["today", "tasks", "history", "settings"]
 SEED_SETTINGS = {
     "googleScriptUrl": "", "geminiApiKey": "", "defaultTone": "casual", "clockInMessageEnabled": False,
@@ -480,7 +480,7 @@ def themes_all_screens(s, shots=None):
         s.set_theme(theme)
         got = s.html_attrs()
         assert got[0] == theme, f"choosing {theme} left data-theme={got[0]}"
-        assert got[1] == ("dark" if theme == "console" else "light"), f"{theme}: data-mode={got[1]}"
+        assert got[1] == ("dark" if theme in ("console", "nightdesk") else "light"), f"{theme}: data-mode={got[1]}"
         assert s.ls("workpulse_settings")["theme"] == theme, f"{theme} not saved at once"
         for screen in SCREENS:
             s.tab(screen)
@@ -490,7 +490,7 @@ def themes_all_screens(s, shots=None):
             s.tab("today")
             s.page.screenshot(path=os.path.join(shots, f"smoke_{theme}.png"))
     s.reload()
-    assert s.html_attrs() == ["console", "dark"], f"theme not restored after reload: {s.html_attrs()}"
+    assert s.html_attrs() == ["nightdesk", "dark"], f"theme not restored after reload: {s.html_attrs()}"
     s.no_errors()
 
 
@@ -500,7 +500,7 @@ def theme_radios_keyboard(s):
     s.tab("settings")
     group = s.page.get_by_role("radiogroup", name=SEL["theme_group"])
     radios = group.get_by_role("radio")
-    assert radios.count() == 3, f"expected three theme tiles, got {radios.count()}"
+    assert radios.count() == 4, f"expected four theme tiles, got {radios.count()}"
     group.get_by_role("radio", name=SEL["theme_tiles"]["chase"], exact=True).focus()
     s.page.keyboard.press("ArrowRight")
     s.page.wait_for_timeout(250)
