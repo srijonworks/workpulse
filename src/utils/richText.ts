@@ -38,6 +38,9 @@ export function parseInline(line: string): Inline[] {
 }
 
 const HEADING = /^(#{1,3})\s+(.+)$/;
+// A line that is only a bold phrase ("*What I completed today:*", maybe after an emoji) is a section heading. The emoji is not shown.
+const BOLD_LINE = /^\*{1,2}([^*\n]+?)\*{1,2}\s*$/;
+const LEADING_SYMBOLS = /^[^\p{L}\p{N}*#]+/u;
 const BULLET = /^\s*([-•]|\d{1,2}[.)])\s+(.+)$/;
 
 /** Splits text into lines, blank gaps, headings and bullets. Every line break the writer made is kept. */
@@ -46,6 +49,8 @@ export function parseBlocks(text: string): Block[] {
     if (line.trim() === '') return { kind: 'blank' };
     const h = HEADING.exec(line);
     if (h) return { kind: 'heading', level: h[1].length as 1 | 2 | 3, inline: parseInline(h[2]) };
+    const bold = BOLD_LINE.exec(line.replace(LEADING_SYMBOLS, '').trim());
+    if (bold && !BULLET.test(line)) return { kind: 'heading', level: 2, inline: [{ kind: 'bold', text: bold[1] }] };
     const b = BULLET.exec(line);
     if (b) return { kind: 'bullet', marker: b[1] === '-' ? '•' : b[1], inline: parseInline(b[2]) };
     return { kind: 'line', inline: parseInline(line) };

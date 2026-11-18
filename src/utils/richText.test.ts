@@ -31,14 +31,21 @@ describe('parseInline', () => {
 describe('parseBlocks', () => {
   it('keeps every line break and blank gap', () => {
     const b = parseBlocks('*What I completed today:*\n• *hims:* fixes\n\nNone');
-    expect(b.map((x) => x.kind)).toEqual(['line', 'bullet', 'blank', 'line']);
+    expect(b.map((x) => x.kind)).toEqual(['heading', 'bullet', 'blank', 'line']);
+  });
+
+  it('makes a bold line after an emoji a heading and drops the emoji', () => {
+    const [h] = parseBlocks('\u{1F680} *What I completed today:*');
+    expect(h).toEqual({ kind: 'heading', level: 2, inline: [{ kind: 'bold', text: 'What I completed today:' }] });
   });
 
   it('reads bullets, numbers and headings, and a star before a word is not a bullet', () => {
     expect(parseBlocks('- one')[0]).toMatchObject({ kind: 'bullet', marker: '•' });
     expect(parseBlocks('2) two')[0]).toMatchObject({ kind: 'bullet', marker: '2)' });
     expect(parseBlocks('## Title')[0]).toMatchObject({ kind: 'heading', level: 2 });
-    expect(parseBlocks('*Blockers*')[0].kind).toBe('line');
+    expect(parseBlocks('*Blockers*')[0].kind).toBe('heading');
+    expect(parseBlocks('*Blockers* none')[0].kind).toBe('line');
+    expect(parseBlocks('* spaced')[0].kind).toBe('line');
   });
 
   it('handles Windows line endings', () => {

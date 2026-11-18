@@ -29,10 +29,16 @@ const inline = (parts: Inline[]): React.ReactNode[] =>
   });
 
 export const RichText: React.FC<{ text: string; className?: string }> = ({ text, className }) => (
-  <div className={className}>
+  <div className={`flex flex-col gap-1.5 leading-relaxed ${className ?? ''}`}>
     {parseBlocks(text).map((b, i) => {
-      if (b.kind === 'blank') return <div key={i} aria-hidden="true" className="h-3" />;
-      if (b.kind === 'heading') return <div key={i} className="font-bold">{inline(b.inline)}</div>;
+      if (b.kind === 'blank') return <div key={i} aria-hidden="true" className="h-1" />;
+      if (b.kind === 'heading') {
+        return (
+          <div key={i} className="mt-1 border-b border-[var(--border-app)] pb-1 font-bold text-[var(--text-main)] first:mt-0">
+            {inline(b.inline)}
+          </div>
+        );
+      }
       if (b.kind === 'bullet') {
         return (
           <div key={i} className="flex gap-2">

@@ -79,12 +79,12 @@ Follow the exact requested format, tone, and audience constraints faithfully.`;
 
   const formatDescription =
     format === 'whatsapp'
-      ? `A concise, polite WhatsApp message for a direct manager or lead. Use WhatsApp markdown (*bold*, _italic_). Include emoji highlights. Keep it mobile-friendly and scannable.`
+      ? `A concise, polite WhatsApp message for a direct manager or lead. Use WhatsApp markdown (*bold*, _italic_). Keep it professional, mobile-friendly and scannable. Use no emoji, or at most one where it truly helps.`
       : format === 'slack'
-      ? `A clean Slack/Teams daily standup update with exactly three sections:
-🚀 *What I completed today:*
-⏳ *In progress / Rolling over:*
-🛑 *Blockers / Waiting on:*`
+      ? `A clean, professional Slack/Teams standup update with exactly three sections. Use plain bold headings with no emoji. Under each heading write short bullets, one per piece of work, starting with the project name in bold (for example "- *project:* what was done"). No filler and no exclamation marks. The sections are:
+*What I completed today:*
+*In progress / Rolling over:*
+*Blockers / Waiting on:*`
       : `An Executive Summary Memo for leadership, directors, or clients. Grouped by project impact, key deliverables, and risks. Polished corporate tone.`;
 
   const prompt = `Please generate a work report based on these logged tasks:
@@ -161,7 +161,7 @@ export function generateFallbackTemplate(
     let out = `${greeting} quick progress update for *${todayStr}*:\n\n`;
 
     if (completed.length > 0) {
-      out += `✅ *Done Today*\n`;
+      out += `*Done Today*\n`;
       completed.forEach((l) => {
         out += `• *[${l.projectName}]* ${l.description}\n`;
       });
@@ -169,7 +169,7 @@ export function generateFallbackTemplate(
     }
 
     if (inProgress.length > 0) {
-      out += `⏳ *In Progress*\n`;
+      out += `*In Progress*\n`;
       inProgress.forEach((l) => {
         out += `• *[${l.projectName}]* ${l.description}\n`;
       });
@@ -177,21 +177,21 @@ export function generateFallbackTemplate(
     }
 
     if (blocked.length > 0) {
-      out += `🛑 *Blockers / Waiting On*\n`;
+      out += `*Blockers / Waiting On*\n`;
       blocked.forEach((l) => {
         out += `• *[${l.projectName}]* ${l.description}\n`;
       });
       out += '\n';
     }
 
-    out += `Let me know if you need anything clarified! 👍`;
+    out += `Let me know if you need anything clarified!`;
     return out;
   }
 
   if (format === 'slack') {
     let out = `*Daily Standup — ${todayStr}*\n\n`;
 
-    out += `🚀 *What I completed today:*\n`;
+    out += `*What I completed today:*\n`;
     if (completed.length > 0) {
       completed.forEach((l) => {
         const link = l.linkUrl ? ` (<${l.linkUrl}|Link>)` : '';
@@ -202,7 +202,7 @@ export function generateFallbackTemplate(
     }
     out += '\n';
 
-    out += `⏳ *In progress / Rolling over:*\n`;
+    out += `*In progress / Rolling over:*\n`;
     if (inProgress.length > 0) {
       inProgress.forEach((l) => {
         out += `• [${l.projectName}] ${l.description}\n`;
@@ -212,7 +212,7 @@ export function generateFallbackTemplate(
     }
     out += '\n';
 
-    out += `🛑 *Blockers / Waiting on:*\n`;
+    out += `*Blockers / Waiting on:*\n`;
     if (blocked.length > 0) {
       blocked.forEach((l) => {
         out += `• [${l.projectName}] ${l.description}\n`;
