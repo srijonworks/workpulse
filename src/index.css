@@ -118,6 +118,12 @@
   }
 }
 
+/* Tick boxes and radio buttons take the theme colour instead of the browser's blue. */
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--accent);
+}
+
 /* Motion is decoration here, so it goes away for people who ask for less of it.
    Spinners stay: they say "working", not "look at me". */
 @media (prefers-reduced-motion: reduce) {

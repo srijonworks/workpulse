@@ -892,9 +892,9 @@ def history_date_range(s):
     bar.get_by_label("Search", exact=True).fill("day 5")
     expect(main.get_by_text("Smoke range day 5")).to_have_count(0)
     # ... until "all dates" is ticked
-    bar.get_by_label(re.compile(r"look at all dates")).check()
+    bar.get_by_label(re.compile(r"Search all dates")).check()
     expect(main.get_by_text("Smoke range day 5")).to_be_visible(timeout=3000)
-    bar.get_by_label(re.compile(r"look at all dates")).uncheck()
+    bar.get_by_label(re.compile(r"Search all dates")).uncheck()
     bar.get_by_label("Search", exact=True).fill("")
     # Today puts it back to one date
     btn(p, "Today", exact=True).click()

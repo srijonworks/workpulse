@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useMemo, useState } from 'react';
 import { DatePicker } from '../../ui/DatePicker';
+import { Checkbox } from '../../ui/Checkbox';
 import { Select } from '../../ui/Select';
 import type { BacklogTask, Project, WorkLog, Workdays } from '../../../types';
 import { addDays, localDateStr, localTimeStr } from '../../../utils/dates';
@@ -261,7 +262,7 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
               value={from}
               max={today}
               onChange={(v) => v && onSelectRange(v, v > to ? v : to)}
-              className="min-w-[11rem]"
+              className="min-w-[11rem] h-11"
             />
           </div>
           <div>
@@ -273,7 +274,7 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
               value={to}
               max={today}
               onChange={(v) => v && onSelectRange(v < from ? v : from, v)}
-              className="min-w-[11rem]"
+              className="min-w-[11rem] h-11"
             />
           </div>
           <div className="flex flex-wrap gap-2">
@@ -315,10 +316,11 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
               id={`${id}-p`}
               value={activeProject}
               onChange={setProjectId}
+              className="h-11"
               options={[{ value: 'all', label: 'All projects' }, ...filterProjects.map((p) => ({ value: p.id, label: p.name }))]}
             />
           </div>
-          <div className="flex justify-end gap-2">
+          <div className="flex items-end justify-end gap-2">
             <SyncButton {...sync} />
             <RowMenu
               label="Export logs"
@@ -327,10 +329,9 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
             />
           </div>
         </div>
-        <label className="flex min-h-8 w-fit items-center gap-2 text-[length:var(--fs-small)] text-[var(--text-muted)] cursor-pointer">
-          <input type="checkbox" checked={allDates} onChange={(e) => setAllDates(e.target.checked)} className="h-4 w-4" />
-          Search and project filter look at all dates, not only the chosen ones
-        </label>
+        <Checkbox checked={allDates} onChange={setAllDates}>
+          Search all dates, not only the chosen ones
+        </Checkbox>
       </section>
 
       <section aria-labelledby={`${id}-week`} className="no-print">
