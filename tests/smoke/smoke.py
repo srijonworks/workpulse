@@ -1038,6 +1038,27 @@ def backup_reminder(s):
     s.no_errors()
 
 
+@check("standup_renders_marks")
+def standup_renders_marks(s):
+    """A saved standup written with *bold* marks and bullets is drawn as bold text, with no stars left on screen."""
+    p = s.page
+    today = s.day(0)
+    rec = {"id": f"day:{today}", "kind": "day", "from": today, "to": today, "writer": "template",
+           "createdAt": "2026-01-01T00:00:00.000Z",
+           "text": "*What I completed today:*\n• *hims:* Code fixes\n\nNone"}
+    s.ctx.add_init_script(
+        "try{ if(!sessionStorage.getItem('smoke_standup')){ sessionStorage.setItem('smoke_standup','1');"
+        " localStorage.setItem('workpulse_standups', %s) } }catch(e){}" % json.dumps(json.dumps([rec])))
+    s.reload()
+    s.tab("history")
+    card = p.locator("main").get_by_text("Code fixes").first
+    expect(card).to_be_visible(timeout=5000)
+    expect(p.locator("main strong", has_text="hims:")).to_be_visible()
+    expect(p.locator("main strong", has_text="What I completed today:")).to_be_visible()
+    assert "*hims:*" not in p.locator("main").inner_text(), "the bold marks are still shown as stars"
+    s.no_errors()
+
+
 @check("offline_notice")
 def offline_notice(s):
     p = s.page

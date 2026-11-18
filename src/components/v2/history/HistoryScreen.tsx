@@ -12,7 +12,7 @@ import { sameTasksIgnoringLiveTime } from '../../../utils/timerStore';
 import { useNow } from '../useNow';
 import { LogRow, formatMinutes } from '../today/LogRow';
 import { RowMenu } from '../RowMenu';
-import { splitBold } from '../../../utils/boldMarks';
+import { RichText } from '../../ui/RichText';
 import { WeekStrip } from './WeekStrip';
 import { SyncButton, type SyncState } from '../SyncButton';
 
@@ -362,9 +362,7 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
                 {rewriteNote}
               </p>
             )}
-            <p className="v2-panel v2-row v2-inset whitespace-pre-wrap text-[length:var(--fs-body)]">
-              {splitBold(standup).map((piece, i) => (piece.bold ? <strong key={i}>{piece.text}</strong> : piece.text))}
-            </p>
+            <RichText text={standup} className="v2-panel v2-row v2-inset text-[length:var(--fs-body)]" />
           </div>
         )}
       </section>
