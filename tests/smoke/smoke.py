@@ -1015,33 +1015,25 @@ def sample_data_flow(s):
 
 @check("backup_reminder")
 def backup_reminder(s):
-    """Quiet for demo data, shown for real work with an old or missing backup, cleared by a backup."""
+    """Backups are automatic: no reminder banner, even for real work. The manual file in Settings still works."""
     p = s.page
     reminder = p.get_by_role("region", name="Backup reminder")
-    expect(reminder).to_have_count(0)  # a new user has nothing to lose yet
     quick_log(s, "Real work to protect")
     s.reload()
-    expect(reminder).to_be_visible(timeout=3000)
-    expect(reminder).to_contain_text("No backup yet")
-    btn(reminder, "Later").click()
+    p.wait_for_timeout(500)
     expect(reminder).to_have_count(0)
-    settings = s.ls("workpulse_settings")
-    settings["lastBackupAt"] = "2000-01-01T00:00:00.000Z"
-    s.set_ls("workpulse_settings", settings)
-    s.reload()
-    expect(reminder).to_contain_text(re.compile(r"Last backup \d+ days ago"))
+    s.tab("settings")
+    s.settings_section("Data & backup")
     with p.expect_download() as dl:
-        btn(reminder, "Back up now").click()
+        btn(p, "Download JSON backup").click()
     name = dl.value.suggested_filename
     assert re.fullmatch(r"workpulse-backup-\d{4}-\d{2}-\d{2}\.json", name), f"unexpected file name {name}"
-    expect(reminder).to_have_count(0)
     saved = s.ls("workpulse_settings")
     assert saved.get("lastBackupAt", "") > "2026", "backup date not recorded"
     backup = json.load(open(dl.value.path(), encoding="utf-8"))
     assert "lastBackupAt" not in backup["settings"] and "geminiApiKey" not in backup["settings"], "device-only values leaked"
     assert any(l["description"] == "Real work to protect" for l in backup["logs"]), "backup is missing the real log"
     assert "workdays" in backup, "backup has no workdays"
-    s.tab("settings")
     expect(p.get_by_test_id("last-backup")).to_have_text("Last backup today")
     s.no_errors()
 

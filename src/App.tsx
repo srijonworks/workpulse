@@ -48,7 +48,6 @@ import {
 } from './utils/workday';
 import { chooseNextAction } from './utils/nextAction';
 import { checkedToday, invalidateActivitySessions, pendingCount, subscribeActivitySession } from './utils/activity/sessionStore';
-import { backupStatus } from './utils/backupReminder';
 import { isSampleLog, sampleCounts, withoutSampleData } from './data/sampleData';
 import { plainSheetMessage } from './utils/aiErrors';
 import { useStableCallback } from './hooks/useStableCallback';
@@ -126,7 +125,6 @@ import { recordRepairs, repairData } from './utils/dataDoctor';
 import { saveSafetyCopy, useDiskCopy, useDiskCopyState } from './hooks/useDiskCopy';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { CrashProbe } from './components/ui/CrashProbe';
-import { BackupReminder } from './components/BackupReminder';
 import { EodSynthesizerModal, SynthesizedLogItem } from './components/EodSynthesizerModal';
 import { ActivitySuggestionsDialog } from './components/activity/ActivitySuggestionsDialog';
 
@@ -207,7 +205,6 @@ export default function App() {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [isSyncingSheet, setIsSyncingSheet] = useState(false);
   // "Later" on the backup reminder: hidden until the next visit, not remembered.
-  const [backupReminderHidden, setBackupReminderHidden] = useState(false);
 
   // Set when a save did not go through and cleared right after, so a "success" toast raised in that same moment
   // ("Log added") says it is not saved yet instead of claiming all is well.
@@ -1764,7 +1761,6 @@ export default function App() {
   }
 
   const samples = sampleCounts(logs, backlog);
-  const backup = backupStatus(settings.lastBackupAt, logs, backlog);
   const showNotices = activeTab === 'today' || activeTab === 'tasks';
 
   return (
@@ -1813,9 +1809,6 @@ export default function App() {
               onClear={handleClearSampleData}
               onOpenSetup={() => setActiveTab('settings')}
             />
-          )}
-          {showNotices && !backupReminderHidden && backup.due && (
-            <BackupReminder days={backup.days} onBackup={handleBackupNow} onLater={() => setBackupReminderHidden(true)} />
           )}
         </div>
 

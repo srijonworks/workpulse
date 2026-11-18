@@ -805,7 +805,7 @@ Your current Gemini API key is kept. Export a backup first if you want to keep y
           <Section
             id="data"
             title="Data & backup"
-            intro="Your data lives only in this browser. Back it up, or take a timesheet out as a spreadsheet."
+            intro="Backups happen on their own (a copy on this PC, and in your Google Sheet when it is linked). A file here is an extra copy you keep yourself, or a timesheet as a spreadsheet."
           >
             <Block title="JSON backup">
               <p className={HINT}>
