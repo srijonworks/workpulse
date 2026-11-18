@@ -406,23 +406,25 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
               </button>
             </div>
           )}
+          <div className="flex flex-col gap-12">
           {result.days.map((d) => {
             const standup = standupFor?.(d.date);
             return (
-              <section key={d.date} aria-labelledby={`${id}-d-${d.date}`} className="flex flex-col gap-3">
-                <h3
-                  id={`${id}-d-${d.date}`}
-                  className="flex flex-wrap items-baseline gap-x-2 text-[length:var(--fs-small)] text-[var(--text-muted)]"
-                >
-                  <span className="font-bold text-[var(--text-main)]">
+              <section key={d.date} aria-labelledby={`${id}-d-${d.date}`} className="flex flex-col gap-4 border-t-2 border-[var(--text-main)] pt-4">
+                <h3 id={`${id}-d-${d.date}`} className="flex flex-col gap-1">
+                  <span className="text-[length:var(--fs-body)] font-bold text-[var(--text-main)]">
                     {d.date === today ? `Today · ${dayLabelLong(d.date)}` : dayLabelLong(d.date)}
                   </span>
-                  {dayMeta(d)}
+                  <span className="flex flex-wrap items-baseline gap-x-2 text-[length:var(--fs-small)] font-normal text-[var(--text-muted)]">
+                    {dayMeta(d)}
+                  </span>
                 </h3>
 
                 {d.doneTasks.length > 0 && (
                   <div>
-                    <h4 className="pb-2 text-[length:var(--fs-small)] font-bold text-[var(--text-main)]">Done tasks</h4>
+                    <h4 className="pb-2 text-[length:var(--fs-small)] font-bold text-[var(--text-main)]">
+                      Done tasks <span className="num font-normal text-[var(--text-muted)]">{d.doneTasks.length}</span>
+                    </h4>
                     <ul className="v2-panel">
                       {d.doneTasks.map((t) => (
                         <li key={t.id} className="v2-row flex items-center gap-2 px-4 py-2 text-[length:var(--fs-body)]">
@@ -439,6 +441,10 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
                 )}
 
                 {d.logs.length > 0 ? (
+                  <div>
+                    <h4 className="pb-2 text-[length:var(--fs-small)] font-bold text-[var(--text-main)]">
+                      Logs <span className="num font-normal text-[var(--text-muted)]">{d.logs.length}</span>
+                    </h4>
                   <ul className="v2-panel">
                     {d.logs.map((l) => (
                       <LogRow
@@ -454,6 +460,7 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
                       />
                     ))}
                   </ul>
+                  </div>
                 ) : (
                   d.doneTasks.length === 0 && (
                     <p className="v2-panel v2-row v2-inset text-[length:var(--fs-body)] text-[var(--text-muted)]">
@@ -499,6 +506,7 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
               </section>
             );
           })}
+          </div>
         </>
       )}
 
