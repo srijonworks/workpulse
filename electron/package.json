@@ -1,7 +1,7 @@
 {
   "name": "workpulse-desktop",
   "productName": "WorkPulse",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "WorkPulse desktop app",
   "main": "main.cjs",
   "private": true,
