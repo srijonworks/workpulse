@@ -59,6 +59,10 @@
     overflow: hidden;
   }
 
+  /* Keep room for the scrollbar always, so a short screen and a long one centre their content at the
+     same x and nothing shifts sideways when a section grows past the window (Settings sections). */
+  html { scrollbar-gutter: stable; }
+
   body {
     font-family: var(--font-body);
     -webkit-font-smoothing: antialiased;
