@@ -64,6 +64,6 @@ New `WorkLog` objects are built in several places. Set the field (or leave it un
 
 ## 8. Verify
 - `npm run lint` must pass (tsc --noEmit).
-- In the browser at http://localhost:3000 (`npm run dev`), **keep your existing localStorage data**: confirm old records still load and render in all three themes (Settings → Appearance), and that new records save the field.
-- Run `npm run test:smoke` (port 3000 free) and add a check to `tests/smoke/smoke.py` if the field adds a flow.
+- In the browser at http://localhost:3737 (`npm run dev`), **keep your existing localStorage data**: confirm old records still load and render in all three themes (Settings → Appearance), and that new records save the field.
+- Run `npm run test:smoke` (port 3737 free) and add a check to `tests/smoke/smoke.py` if the field adds a flow.
 - If sync changed, test it against a scratch Google Sheet.

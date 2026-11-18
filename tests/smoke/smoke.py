@@ -5,13 +5,13 @@ touch the repo or the user's browser profile: every check starts in a fresh, emp
 browser context (so the app starts on its sample data). Screenshots are only written
 when --shots DIR is given.
 
-From the repo root (starts and stops the dev server for you; port 3000 must be free):
+From the repo root (starts and stops the dev server for you; port 3737 must be free):
 
     npm run test:smoke
 
 Or against a server that is already running:
 
-    python tests/smoke/smoke.py --url http://localhost:3000
+    python tests/smoke/smoke.py --url http://localhost:3737
 
 Options:  --only NAME[,NAME]   run only these checks      --list   list checks
           --shots DIR          save a screenshot on failure and after theme switches
@@ -94,7 +94,7 @@ SEL = {
     "phone_section": "#settings-phone",                   # CSS: Settings > Phone & evening email
     "set_pin": "Set PIN", "change_pin": "Change PIN", "reset_access": "Reset phone access",
     "pin_new": "New PIN", "pin_again": "New PIN again", "phone_link": "Phone link",
-    "email_on": "Send me an evening email", "email_save": "Save email settings", "email_test": "Send a test email",
+    "email_on": "Send me a daily email", "email_save": "Save email settings", "email_test": "Send a test email",
     # dialogs
     "palette_trigger_key": "Control+k",
     "palette_input": "[role=dialog] input[role=combobox]",  # CSS (the quick inputs are comboboxes too)
@@ -2061,6 +2061,17 @@ def phone_email_settings(s):
     mail = stub.payloads("setEmail")[0]
     assert (mail["token"], mail["enabled"], mail["hour"], mail["minute"]) == (PHONE_TOKEN, True, 18, 0) and mail["tz"], \
         f"unexpected setEmail request {mail}"
+    assert saved.get("emailWhen") in (None, "fixed"), "a fixed time is the default"
+    # "when I clock out": no daily timer in the Sheet, the choice is saved
+    sec.get_by_role("radio", name=re.compile(r"When I clock out")).check()
+    expect(sec.get_by_label("Around", exact=True)).to_be_hidden()
+    btn(sec, SEL["email_save"], exact=True).click()
+    expect(sec).to_contain_text("The daily email is on. It arrives a few minutes", timeout=5000)
+    saved = s.ls("workpulse_settings")
+    assert saved.get("emailEnabled") is True and saved.get("emailWhen") == "clockout", "the clock-out choice was not saved"
+    assert stub.payloads("setEmail")[-1]["enabled"] is False, "clock-out mode must not keep a daily timer in the Sheet"
+    sec.get_by_role("radio", name=re.compile(r"At a fixed time")).check()
+    expect(sec.get_by_label("Around", exact=True)).to_be_visible()
     btn(sec, SEL["email_test"], exact=True).click()
     expect(sec).to_contain_text("Test email sent to owner@gmail.com.", timeout=5000)
     s.no_overflow("Settings")
@@ -2399,7 +2410,7 @@ def activity_phone(s):
 # ---------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--url", default=os.environ.get("WP_URL", "http://localhost:3000"))
+    ap.add_argument("--url", default=os.environ.get("WP_URL", "http://localhost:3737"))
     ap.add_argument("--only", default="")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--shots", default="")

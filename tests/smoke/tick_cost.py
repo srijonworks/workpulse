@@ -3,7 +3,7 @@ Chrome's own counters (script time and task time) over a fixed window, per theme
 console) on the Today and Tasks screens. The sample data has one task running.
 
 Usage (server already running):  python tests/smoke/tick_cost.py [--url URL] [--seconds 8]
-Or with its own server:          python .claude/skills/webapp-testing/scripts/with_server.py --server "npm run dev" --port 3000 --timeout 60 -- python tests/smoke/tick_cost.py
+Or with its own server:          python .claude/skills/webapp-testing/scripts/with_server.py --server "npm run dev" --port 3737 --timeout 60 -- python tests/smoke/tick_cost.py
 
 Numbers are milliseconds of main-thread work per second of wall time. Compare before and after a
 change on the same machine; the absolute values depend on the CPU. Always exits 0.
@@ -28,7 +28,7 @@ def measure(page, seconds):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--url", default=os.environ.get("WP_URL", "http://localhost:3000"))
+    ap.add_argument("--url", default=os.environ.get("WP_URL", "http://localhost:3737"))
     ap.add_argument("--seconds", type=float, default=8)
     a = ap.parse_args()
     print(f"{'theme/screen':24} {'script ms/s':>12} {'task ms/s':>10} {'layout':>8} {'style':>8}")

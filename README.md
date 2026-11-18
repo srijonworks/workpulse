@@ -44,7 +44,7 @@ Browser (React 19 SPA)                         Express server (server.ts, no dat
   Data is saved to localStorage keys `workpulse_logs`, `workpulse_backlog`, `workpulse_projects`, `workpulse_tags`,
   `workpulse_settings` and `workpulse_workdays`. A 1-second interval adds elapsed time to running tasks.
 - **Server.** A thin proxy. It holds no data. In development it mounts Vite as middleware, so UI and API share
-  `http://localhost:3000`.
+  `http://localhost:3737`.
 - **AI writer.** One setting (Settings → AI) for standup, end of day and suggestions: **Claude Code** (default; runs your own
   `claude -p`, no API key), **Gemini** (needs a key), or **none** (plain templates, no AI call). If the AI fails, the app
   falls back to templates and says why.
@@ -64,7 +64,7 @@ Browser (React 19 SPA)                         Express server (server.ts, no dat
 ### Windows: one click
 
 Double-click **`run.bat`**. It checks Node, installs dependencies, creates `.env.local`, picks a free port and opens
-http://localhost:3000.
+http://localhost:3737.
 
 - `run.bat prod` runs an optimized production build
 - `set PORT=4000` first to choose another port, `set NO_BROWSER=1` to skip opening the browser
@@ -73,7 +73,7 @@ http://localhost:3000.
 
 ```bash
 npm install
-npm run dev        # http://localhost:3000
+npm run dev        # http://localhost:3737
 ```
 
 For production: `npm run build`, then `NODE_ENV=production npm start`.

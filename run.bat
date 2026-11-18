@@ -90,7 +90,7 @@ if not exist ".env.local" if not exist ".env" (
 )
 
 REM --- 4. Pick a free port ---------------------------------------------------
-if not defined PORT set "PORT=3000"
+if not defined PORT set "PORT=3737"
 set /a "PORT_LIMIT=PORT+50"
 :checkport
 netstat -ano | findstr /r /c:":%PORT% .*LISTENING" >nul

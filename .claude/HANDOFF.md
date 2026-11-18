@@ -38,7 +38,7 @@
 - STAGE 3 IS DONE. Next: Stage 4 (standups + Apps Script v6 + email), Stage 5 (day view + widget), Stage 6 (System status UI + docs), Stage 2 leftovers. Old note follows: then 3B clock automation (popup, auto clock-out, busy time), 3C day-close journal.
 - Stage 2 still open: utility-process server with restart, crash-loop safe mode, hung-instance takeover, sync outbox (`syncedAt` = request start), widget 'Not updating' marker. Older text: Electron supervision (utility process, watchdogs, hidden start, flush), sync outbox. Then stages 3 to 6.
 - Update `CLAUDE.md` (storage engine, disk copies, `~/WorkPulse`); `desktop:pack` not tried; ask the user whether to commit.
-- Before smoke/restore checks: make sure no old dev server holds port 3000 (a stale one gave false results).
+- Before smoke/restore checks: make sure no old dev server holds port 3737 (a stale one gave false results).
 
 ## Files changed
 - `src/server/localCopy.ts`, `server.ts` — disk copies and routes.
@@ -46,5 +46,5 @@
 - Earlier stages: `src/utils/storage.ts`, `src/utils/persist/engine.ts`, `src/utils/net/`, `src/utils/health/`, `src/shell/`, `electron/`, `scripts/`, `tests/smoke/`.
 
 ## Please test
-- Run the app, add a log, wait 20 s, check `~/WorkPulse/backups/localhost-3000/latest.json`; open it in a fresh browser profile and use "Restore my data".
+- Run the app, add a log, wait 20 s, check `~/WorkPulse/backups/localhost-3737/latest.json`; open it in a fresh browser profile and use "Restore my data".
 - Lint: passes. Unit 881, smoke 48/48.

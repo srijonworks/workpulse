@@ -72,7 +72,7 @@ const shortReason = (errors: string[]) => (errors[0] || 'unknown error').slice(0
 async function startServer() {
   const app = express();
   const httpServer = http.createServer(app);
-  const PORT = Number(process.env.PORT) || 3000;
+  const PORT = Number(process.env.PORT) || 3737;
   // Localhost only by default. Set HOST=0.0.0.0 to allow other devices on your network (no authentication!).
   const HOST = process.env.HOST || '127.0.0.1';
 

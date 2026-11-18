@@ -9,7 +9,7 @@ Reports, for every visible interactive element:
   no-focus     Tab lands on it and nothing visible changes (no outline, ring, border or fill change)
 
 Usage (server already running):  python tests/smoke/a11y_live.py [--url URL] [--json OUT] [--verbose] [--no-focus]
-Or with its own server:          python .claude/skills/webapp-testing/scripts/with_server.py --server "npm run dev" --port 3000 --timeout 60 -- python tests/smoke/a11y_live.py
+Or with its own server:          python .claude/skills/webapp-testing/scripts/with_server.py --server "npm run dev" --port 3737 --timeout 60 -- python tests/smoke/a11y_live.py
 
 A regression gate, not a verdict: automated checks catch about a third of real problems.
 Exit code is always 0; read the numbers.
@@ -108,7 +108,7 @@ def focus_walk(page, limit=70):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--url", default=os.environ.get("WP_URL", "http://localhost:3000"))
+    ap.add_argument("--url", default=os.environ.get("WP_URL", "http://localhost:3737"))
     ap.add_argument("--json", default="")
     ap.add_argument("--tabs", default="feed,backlog,analytics,settings")
     ap.add_argument("--verbose", action="store_true")

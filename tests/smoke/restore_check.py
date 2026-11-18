@@ -1,7 +1,7 @@
 import glob, json, os, sys, tempfile
 from playwright.sync_api import sync_playwright
 
-URL = "http://localhost:3000/"
+URL = "http://localhost:3737/"
 ok = True
 def check(name, cond, extra=""):
     global ok

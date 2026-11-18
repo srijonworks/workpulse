@@ -161,6 +161,8 @@ export interface AppSettings {
   // Evening email from the Apps Script. emailTime is "HH:MM" local time; absent = 18:00.
   emailEnabled?: boolean;
   emailTime?: string;
+  // When the daily email goes out: 'clockout' (right after the day closes) or 'fixed' (at emailTime). Absent = 'fixed'.
+  emailWhen?: 'clockout' | 'fixed';
   // Who the evening email goes to (comma-separated, up to 5). Absent = the Google account that owns the script.
   emailTo?: string;
 }

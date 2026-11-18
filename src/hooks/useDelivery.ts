@@ -2,13 +2,15 @@ import { useEffect, useRef } from 'react';
 import type { AppSettings, StandupRecord, WorkLog, Workdays } from '../types';
 import { cancelDayEmail, saveHistory, sendDayEmail, type PhoneApiResult } from '../utils/phoneApi';
 import { health } from '../utils/health/registry';
-import { EMAIL_DELAY_MINUTES, daysToDeliver, historyRow, readDelivery, standupRow, writeDelivery } from '../utils/jobs/delivery';
+import { daysToDeliver, historyRow, readDelivery, standupRow, writeDelivery } from '../utils/jobs/delivery';
 import { retryDelayMs } from '../utils/jobs/journal';
+import { CLOCKOUT_EMAIL_DELAY_MINUTES, emailWhenOf } from '../utils/emailWhen';
 
-// Sends each closed day to the Google Sheet (day history and the standup) and books the standup email for about 30
-// minutes later, from the user's own Gmail through their Apps Script (version 6). Done once per day; a failure is tried
-// again later with growing waits; a Resume cancels a booked email. Needs the evening email switched on and the phone
-// access set up. A day with nothing logged has no standup, so no email goes out for it.
+// Sends each closed day to the Google Sheet (day history and the standup). When the email is set to "when I clock out"
+// it also sends the standup email at once, from the user's own Gmail through their Apps Script (version 6); with a fixed
+// time the Sheet's own daily timer sends the evening email and nothing is mailed from here. Done once per day; a failure
+// is tried again later with growing waits; a Resume cancels an email that is still waiting. Needs the email switched on and
+// the phone access set up. A day with nothing logged has no standup, so no email goes out for it.
 
 const TICK_MS = 2 * 60_000;
 
@@ -58,9 +60,10 @@ export function useDelivery(args: {
         const rows = [day, week].filter((s): s is StandupRecord => !!s).map(standupRow);
         const saved = await saveHistory(url, token, { days: [historyRow(date, workdays, logs)], standups: rows });
         let outcome: PhoneApiResult<unknown> = saved;
-        if (saved.ok) {
-          const mails = [await sendDayEmail(url, token, { kind: 'day', date }, { delayMinutes: EMAIL_DELAY_MINUTES, requestId: `day-${date}` })];
-          if (week) mails.push(await sendDayEmail(url, token, { kind: 'week', from: week.from, to: week.to }, { delayMinutes: EMAIL_DELAY_MINUTES, requestId: `week-${date}` }));
+        if (saved.ok && emailWhenOf(settings) === 'clockout') {
+          const delayMinutes = CLOCKOUT_EMAIL_DELAY_MINUTES;
+          const mails = [await sendDayEmail(url, token, { kind: 'day', date }, { delayMinutes, requestId: `day-${date}` })];
+          if (week) mails.push(await sendDayEmail(url, token, { kind: 'week', from: week.from, to: week.to }, { delayMinutes, requestId: `week-${date}` }));
           outcome = mails.find((m) => !m.ok) ?? mails[0];
         }
         if (outcome.ok) {

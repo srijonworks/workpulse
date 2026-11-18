@@ -4,6 +4,7 @@ import type { AppSettings } from '../../../types';
 import type { PhoneSyncStatus } from '../../../hooks/usePhoneSync';
 import { getScriptVersion, resetPhoneAccess, sendTestEmail, setEmailSchedule, setPhonePin } from '../../../utils/phoneApi';
 import { APPS_SCRIPT_SCOPES_SNIPPET } from '../../../utils/googleAppsScriptTemplate';
+import { emailWhenOf, type EmailWhen } from '../../../utils/emailWhen';
 import { DEFAULT_EMAIL_TIME, cleanRecipients, emailTimeAllowed, parseEmailTime, phoneLink } from '../../../utils/phoneSettings';
 import { GOOGLE_APPS_SCRIPT_CODE } from '../../../utils/googleAppsScriptTemplate';
 import { localDateOfIso, localDateStr, localTimeStr } from '../../../utils/dates';
@@ -131,6 +132,7 @@ export const PhoneEmailSection: React.FC<PhoneEmailSectionProps> = ({ settings, 
   const savedTime = parseEmailTime(settings.emailTime) ? (settings.emailTime as string) : DEFAULT_EMAIL_TIME;
   const [emailOn, setEmailOn] = useState(settings.emailEnabled === true);
   const [emailTime, setEmailTime] = useState(savedTime);
+  const [emailWhen, setEmailWhen] = useState<EmailWhen>(emailWhenOf(settings));
   const [emailTo, setEmailTo] = useState(settings.emailTo ?? '');
   const [emailBusy, setEmailBusy] = useState<'save' | 'test' | null>(null);
   const [emailResult, setEmailResult] = useState<Result>(null);
@@ -216,11 +218,12 @@ export const PhoneEmailSection: React.FC<PhoneEmailSectionProps> = ({ settings, 
 
   const saveEmail = async () => {
     const t = parseEmailTime(emailTime);
-    if (emailOn && !t) {
+    const fixed = emailWhen === 'fixed';
+    if (emailOn && fixed && !t) {
       setEmailResult({ ok: false, message: 'Enter a time such as 18:00.' });
       return;
     }
-    if (emailOn && !emailTimeAllowed(emailTime)) {
+    if (emailOn && fixed && !emailTimeAllowed(emailTime)) {
       setEmailResult({ ok: false, message: 'Pick a time between 00:30 and 23:29.' });
       return;
     }
@@ -232,20 +235,23 @@ export const PhoneEmailSection: React.FC<PhoneEmailSectionProps> = ({ settings, 
     const time = t ?? parseEmailTime(DEFAULT_EMAIL_TIME)!;
     setEmailBusy('save');
     setEmailResult(null);
-    const r = await setEmailSchedule(url, token, { enabled: emailOn, hour: time.hour, minute: time.minute, tz: zone(), to });
+    // "When I clock out" needs no daily timer in the Sheet (the standup email is sent from the app); only a fixed time does.
+    const r = await setEmailSchedule(url, token, { enabled: emailOn && fixed, hour: time.hour, minute: time.minute, tz: zone(), to });
     setEmailBusy(null);
     if (!r.ok) {
       setEmailResult({ ok: false, message: r.message });
       return;
     }
     const hhmm = `${String(time.hour).padStart(2, '0')}:${String(time.minute).padStart(2, '0')}`;
-    onUpdateSettings({ emailEnabled: emailOn, emailTime: hhmm, emailTo: to || undefined });
+    onUpdateSettings({ emailEnabled: emailOn, emailTime: hhmm, emailWhen, emailTo: to || undefined });
     setEmailTo(to);
     setEmailResult({
       ok: true,
-      message: emailOn
-        ? `Evening email is on. It arrives around ${hhmm} on days with a log or a clock-in.`
-        : 'Evening email is off.',
+      message: !emailOn
+        ? 'The daily email is off.'
+        : fixed
+          ? `The daily email is on. It arrives around ${hhmm} on days with a log or a clock-in.`
+          : 'The daily email is on. It arrives a few minutes after you clock out. A day you forget is closed for you, and the email follows.',
     });
   };
 
@@ -482,14 +488,14 @@ export const PhoneEmailSection: React.FC<PhoneEmailSectionProps> = ({ settings, 
       />
 
       <div className="flex flex-col items-start gap-3 border-t border-[var(--border-app)] pt-5">
-        <h3 className={SUB}>Evening email</h3>
+        <h3 className={SUB}>Daily email</h3>
         {!token ? (
           <p className={HINT}>Set the phone PIN first; the email uses the same link to your Sheet.</p>
         ) : (
           <>
             <p className={HINT}>
-              A summary of the day (hours, logs by project, tasks done and still open) sent to your Google address. Google
-              sends it within about 15 minutes of the time you choose.
+              One email a day from your own Google account. Choose when it arrives: right after you clock out, or at a fixed
+              time of day.
             </p>
             <label className="flex items-center gap-2.5 min-h-11 text-[length:var(--fs-body)] text-[var(--text-main)] cursor-pointer">
               <input
@@ -501,8 +507,50 @@ export const PhoneEmailSection: React.FC<PhoneEmailSectionProps> = ({ settings, 
                 }}
                 className="w-4 h-4 accent-[var(--accent-text)]"
               />
-              <span className="font-semibold">Send me an evening email</span>
+              <span className="font-semibold">Send me a daily email</span>
             </label>
+            <fieldset disabled={!emailOn} className="flex w-full flex-col gap-2 border-0 p-0 disabled:opacity-60">
+              <legend className={LABEL}>When it arrives</legend>
+              <label className="flex items-start gap-2.5 min-h-11 text-[length:var(--fs-body)] text-[var(--text-main)] cursor-pointer">
+                <input
+                  type="radio"
+                  name={`${uid}-when`}
+                  checked={emailWhen === 'clockout'}
+                  onChange={() => {
+                    setEmailWhen('clockout');
+                    setEmailResult(null);
+                  }}
+                  className="mt-1 h-4 w-4"
+                />
+                <span>
+                  <span className="font-semibold">When I clock out</span>
+                  <span className="block text-[length:var(--fs-small)] text-[var(--text-muted)]">
+                    The day&rsquo;s standup arrives a few minutes after you clock out. If you forget, WorkPulse clocks you out by
+                    itself (when you have been idle for an hour after your hours are done, or just after midnight at the latest)
+                    and sends it then.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2.5 min-h-11 text-[length:var(--fs-body)] text-[var(--text-main)] cursor-pointer">
+                <input
+                  type="radio"
+                  name={`${uid}-when`}
+                  checked={emailWhen === 'fixed'}
+                  onChange={() => {
+                    setEmailWhen('fixed');
+                    setEmailResult(null);
+                  }}
+                  className="mt-1 h-4 w-4"
+                />
+                <span>
+                  <span className="font-semibold">At a fixed time</span>
+                  <span className="block text-[length:var(--fs-small)] text-[var(--text-muted)]">
+                    A summary of the day (hours, logs by project, tasks done and still open) around the time you pick. Google sends it
+                    within about 15 minutes of that time.
+                  </span>
+                </span>
+              </label>
+            </fieldset>
             <div className="w-full sm:max-w-md">
               <label htmlFor={`${uid}-to`} className={LABEL}>
                 Send it to
@@ -546,7 +594,7 @@ export const PhoneEmailSection: React.FC<PhoneEmailSectionProps> = ({ settings, 
             </div>
             {/* Phones: the time field and the two buttons stack at full width, like Test connection above. */}
             <div className="w-full flex flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap sm:items-end">
-              <div>
+              <div hidden={emailWhen !== 'fixed'}>
                 <label htmlFor={`${uid}-time`} className={LABEL}>
                   Around
                 </label>

@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en" data-theme="dusk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorkPulse: Dusk theme (design preview)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Dusk: low-glare night theme. Variable names match src/index.css so it ports as [data-theme="dusk"]. */
+:root {
+  --bg-app: #11141a;
+  --bg-surface: #161a21;
+  --bg-subtle: #1c212a;
+  --bg-subtle-hover: #232936;
+  --border-app: #252b36;
+  --border-control: #5d6677;
+  --text-main: #d8dde6;
+  --text-muted: #8f98a8;
+  --accent: #e0b56b;
+  --accent-text: #e0b56b;
+  --on-accent: #1d1608;
+  --border-focus: #e0b56b;
+  --clock-calm: #8f98a8;
+  --clock-near: #e0b56b;
+  --clock-due: #e59a63;
+  --clock-over: #dd7f78;
+  --success: #7fbf9d; --danger: #e08a82;
+  --p-api: #7aa2d6; --p-ui: #6fb5a8; --p-ops: #c98a9b;
+  --radius: 8px;
+  --font-body: 'Schibsted Grotesk', system-ui, 'Noto Sans Bengali', sans-serif;
+  --font-num: 'Spline Sans Mono', ui-monospace, 'Noto Sans Bengali', monospace;
+  --fs-body: 15px; --fs-small: 13px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; margin: 0; }
+body { background: var(--bg-app); color: var(--text-main); font: 400 var(--fs-body)/1.5 var(--font-body); min-height: 100vh; }
+.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.small { font-size: var(--fs-small); color: var(--text-muted); }
+.spacer { flex: 1; }
+[hidden] { display: none !important; }
+
+/* Header */
+.header { display: flex; align-items: center; gap: 24px; padding: 12px 24px; border-bottom: 1px solid var(--border-app); }
+.brand { font-weight: 600; display: flex; align-items: center; gap: 10px; }
+.brand i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.tabs { display: flex; gap: 4px; }
+.tab { background: none; border: 0; padding: 7px 12px; border-radius: 6px; color: var(--text-muted); min-height: 32px; }
+.tab:hover { background: var(--bg-subtle); color: var(--text-main); }
+.tab[aria-current="page"] { color: var(--text-main); background: var(--bg-subtle); font-weight: 500; }
+.btn { border: 1px solid var(--border-control); background: none; padding: 6px 14px; border-radius: 6px; min-height: 34px; white-space: nowrap; }
+.btn:hover { background: var(--bg-subtle-hover); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.quiet { border-color: transparent; color: var(--text-muted); }
+.btn.quiet:hover { color: var(--text-main); }
+.toggle[aria-pressed="true"] { background: var(--bg-subtle-hover); border-color: var(--accent); color: var(--accent-text); }
+
+/* Band: the day on a true hour scale */
+.band { padding: 18px 24px 16px; border-bottom: 1px solid var(--border-app); display: grid; gap: 14px; }
+.band-top { display: flex; align-items: flex-end; gap: 32px; flex-wrap: wrap; }
+.left-big { font-size: 38px; line-height: 1; font-weight: 500; color: var(--clock-calm); }
+.stat b { display: block; color: var(--text-main); font-weight: 500; font-size: var(--fs-body); }
+.tl { position: relative; height: 70px; }
+.tl-window { position: absolute; top: 14px; height: 30px; border-radius: 6px; background: var(--bg-subtle); border: 1px solid var(--border-app); }
+.tl-seg { position: absolute; top: 18px; height: 22px; border-radius: 3px; }
+.tl-now { position: absolute; top: 8px; height: 42px; width: 2px; background: var(--text-main); }
+.tl-now-label { position: absolute; top: -6px; transform: translateX(-50%); font-size: 12px; color: var(--text-main); background: var(--bg-app); padding: 0 4px; }
+.tl-leave { position: absolute; top: 14px; height: 30px; border-right: 1px dashed var(--text-muted); }
+.tl-leave-label { position: absolute; top: -6px; transform: translateX(-100%); font-size: 12px; color: var(--text-muted); padding-right: 6px; }
+.tl-tick { position: absolute; top: 48px; height: 6px; border-left: 1px solid var(--border-control); }
+.tl-hour { position: absolute; top: 54px; font-size: 12px; color: var(--text-muted); transform: translateX(-50%); }
+.legend { display: flex; gap: 20px; flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+/* Shared */
+.wrap { max-width: 1120px; margin: 0 auto; padding: 24px; }
+.two { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 24px; }
+.panel { background: var(--bg-surface); border: 1px solid var(--border-app); border-radius: var(--radius); overflow: hidden; }
+.wrap > .panel + .panel { margin-top: 16px; }
+.tl { margin: 0 12px; }
+.panel-head { display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--border-app); flex-wrap: wrap; }
+.panel-head h2 { font-size: var(--fs-body); font-weight: 600; }
+.count { color: var(--text-muted); }
+.input, .select { background: var(--bg-app); color: var(--text-main); border: 1px solid var(--border-control); border-radius: 6px; padding: 7px 12px; min-height: 34px; font: inherit; }
+.input::placeholder { color: var(--text-muted); }
+.input:focus-visible { outline: none; border-color: var(--border-focus); box-shadow: 0 0 0 1px var(--border-focus); }
+.select { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+.select::after { content: ""; width: 6px; height: 6px; border-right: 1.5px solid var(--text-muted); border-bottom: 1.5px solid var(--text-muted); transform: rotate(45deg) translateY(-2px); }
+.quick { display: block; width: calc(100% - 36px); margin: 14px 18px; }
+.chip { border: 1px solid var(--border-app); background: none; border-radius: 999px; padding: 3px 12px; color: var(--text-muted); min-height: 30px; }
+.chip:hover { color: var(--text-main); background: var(--bg-subtle); }
+.chip[aria-pressed="true"] { color: var(--text-main); background: var(--bg-subtle-hover); border-color: var(--border-control); }
+
+.row { display: grid; grid-template-columns: 4px 1fr auto auto; align-items: center; gap: 14px; padding: 12px 18px; border-top: 1px solid var(--border-app); }
+.row.sel { grid-template-columns: 20px 4px 1fr auto auto; }
+.bar { align-self: stretch; border-radius: 2px; min-height: 30px; }
+.title { font-weight: 500; }
+.row.running { background: var(--bg-subtle); }
+.row.running .title { font-weight: 600; }
+.row.running .time { color: var(--accent-text); font-size: 20px; }
+.time { color: var(--text-muted); }
+.row.done .title { color: var(--text-muted); font-weight: 400; text-decoration: line-through; text-decoration-color: var(--border-control); }
+.act { min-width: 74px; }
+.menu { background: none; border: 0; color: var(--text-muted); min-width: 32px; min-height: 32px; border-radius: 6px; }
+.menu:hover { background: var(--bg-subtle-hover); color: var(--text-main); }
+input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
+.group-head { display: flex; align-items: center; gap: 12px; padding: 10px 18px; background: var(--bg-subtle); border-top: 1px solid var(--border-app); }
+.group-head h3 { font-size: var(--fs-small); font-weight: 600; }
+.log { padding: 12px 18px; border-top: 1px solid var(--border-app); display: grid; grid-template-columns: 4px 1fr auto; gap: 14px; }
+.log .meta { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
+.badge { border: 1px solid var(--border-control); border-radius: 4px; padding: 0 6px; font-size: var(--fs-small); color: var(--text-muted); }
+.foot { display: flex; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border-app); }
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 14px 18px; }
+
+/* History */
+.week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; padding: 16px 18px; }
+.wd { background: none; border: 1px solid var(--border-app); border-radius: 6px; padding: 8px 6px 10px; display: grid; gap: 6px; justify-items: center; }
+.wd:hover { background: var(--bg-subtle); }
+.wd[aria-pressed="true"] { border-color: var(--accent); background: var(--bg-subtle); }
+.wd .col { width: 100%; max-width: 28px; height: 56px; display: flex; align-items: flex-end; }
+.wd .col i { display: block; width: 100%; border-radius: 3px 3px 0 0; background: var(--text-muted); }
+.wd[aria-pressed="true"] .col i { background: var(--accent); }
+.day-head { padding: 14px 18px 10px; border-top: 2px solid var(--border-control); display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; background: var(--bg-surface); }
+.day-head h3 { font-size: 18px; font-weight: 600; }
+.sub { padding: 8px 18px 4px; font-size: var(--fs-small); color: var(--text-muted); font-weight: 600; }
+.standup { margin: 12px 18px 16px; padding: 12px 14px; background: var(--bg-subtle); border-radius: 6px; }
+.standup h4 { font-size: var(--fs-small); margin-bottom: 4px; }
+.standup p { color: var(--text-muted); }
+
+/* Settings */
+.settings { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: start; }
+.anchors { position: sticky; top: 16px; display: grid; gap: 2px; }
+.anchors a { color: var(--text-muted); text-decoration: none; padding: 6px 10px; border-radius: 6px; }
+.anchors a:hover, .anchors a.on { background: var(--bg-subtle); color: var(--text-main); }
+.field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; padding: 14px 18px; border-top: 1px solid var(--border-app); align-items: center; }
+.field p { font-weight: 500; }
+.switch { width: 40px; height: 22px; border-radius: 999px; border: 1px solid var(--border-control); background: var(--bg-app); position: relative; padding: 0; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-muted); }
+.switch[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
+.switch[aria-checked="true"]::after { left: 21px; background: var(--on-accent); }
+.themes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 16px 18px; }
+.theme { border: 1px solid var(--border-app); border-radius: 8px; background: none; padding: 10px; text-align: left; display: grid; gap: 8px; }
+.theme[aria-pressed="true"] { border-color: var(--accent); }
+.swatch { height: 54px; border-radius: 4px; display: grid; grid-template-rows: 14px 1fr; overflow: hidden; border: 1px solid #0003; }
+.swatch i { display: block; } .swatch b { display: flex; gap: 4px; padding: 6px; align-items: flex-end; }
+.swatch b em { display: block; height: 6px; flex: 1; border-radius: 2px; }
+.status { display: flex; align-items: center; gap: 10px; }
+.status i { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+.status i.warn { background: var(--clock-near); }
+
+/* Dialog: End my day */
+.scrim { position: fixed; inset: 0; background: #05070bcc; display: grid; place-items: center; padding: 16px; z-index: 10; }
+.dialog { width: min(680px, 100%); max-height: calc(100vh - 32px); overflow: auto; background: var(--bg-surface); border: 1px solid var(--border-control); border-radius: 10px; }
+.steps { display: flex; gap: 0; padding: 0 18px; border-bottom: 1px solid var(--border-app); overflow-x: auto; }
+.step { padding: 12px 14px; color: var(--text-muted); border-bottom: 2px solid transparent; white-space: nowrap; background: none; border-top: 0; border-left: 0; border-right: 0; }
+.step[aria-current="step"] { color: var(--text-main); border-bottom-color: var(--accent); font-weight: 500; }
+.step.skip { text-decoration: line-through; text-decoration-color: var(--border-control); }
+
+@media (max-width: 860px) {
+  .wrap { padding: 16px; }
+  .two, .settings { grid-template-columns: 1fr; }
+  .anchors { position: static; grid-auto-flow: column; overflow-x: auto; }
+  .header { padding: 10px 16px; gap: 10px; flex-wrap: wrap; }
+  .tabs { order: 3; width: 100%; overflow-x: auto; }
+  .band { padding: 16px; }
+  .left-big { font-size: 32px; }
+  .themes { grid-template-columns: repeat(2, 1fr); }
+  .week { gap: 4px; padding: 12px; }
+  .tl-hour.odd { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+body.focus .band, body.focus .tabs, body.focus .panel:not(.tasks) { opacity: .28; pointer-events: none; }
+body.focus .row:not(.running) { opacity: .35; }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="brand"><i aria-hidden="true"></i>WorkPulse</div>
+  <nav class="tabs" aria-label="Screens">
+    <button class="tab" data-tab="today" aria-current="page">Today</button>
+    <button class="tab" data-tab="tasks">Tasks</button>
+    <button class="tab" data-tab="history">History</button>
+    <button class="tab" data-tab="settings">Settings</button>
+  </nav>
+  <div class="spacer"></div>
+  <button class="btn toggle" id="focusBtn" aria-pressed="false" title="Dim everything except the running task">Focus</button>
+  <button class="btn primary">Review 2 suggestions</button>
+</header>
+
+<section class="band" aria-label="Office day">
+  <div class="band-top">
+    <div>
+      <div class="left-big num" id="left">3:40:10</div>
+      <div class="small">left until 17:10</div>
+    </div>
+    <div class="stat small">Now<b class="num" id="now">13:29:50</b></div>
+    <div class="stat small">Came in<b class="num">09:10</b></div>
+    <div class="stat small">Worked<b class="num" id="worked">3h 49m</b></div>
+    <div class="stat small">Goal<b class="num">8h</b></div>
+  </div>
+  <div class="tl" id="tl" aria-label="Your day from 09:00 to 18:00"></div>
+  <div class="legend small" id="legend"></div>
+</section>
+
+<!-- TODAY -->
+<div class="wrap" data-screen="today">
+ <div class="two">
+  <section class="panel tasks" aria-label="Today's tasks" style="align-self:start">
+    <div class="panel-head"><h2>Today's tasks</h2><span class="count num">4</span><div class="spacer"></div><button class="btn">Plan your day</button></div>
+    <input class="input quick" placeholder="Add a task. Enter plans it, Shift+Enter starts it. #project picks the project" aria-label="Add a task">
+    <div class="row running"><span class="bar" style="background:var(--p-api)"></span>
+      <div><div class="title">Fix duplicate invoice rows in the export</div><div class="small">Billing API</div></div>
+      <span class="time num" id="runTime">00:34:19</span><button class="btn act">Pause</button></div>
+    <div class="row"><span class="bar" style="background:var(--p-ui)"></span>
+      <div><div class="title">Review the new filter bar spacing</div><div class="small">Dashboard</div></div>
+      <span class="time num">00:22:05</span><button class="btn act">Resume</button></div>
+    <div class="row"><span class="bar" style="background:var(--p-ops)"></span>
+      <div><div class="title">Rotate the staging database password</div><div class="small">Operations</div></div>
+      <span class="time num">Planned</span><button class="btn act">Start</button></div>
+    <div class="row done"><span class="bar" style="background:var(--p-api)"></span>
+      <div><div class="title">Write the token refresh test</div><div class="small">Billing API</div></div>
+      <span class="time num">01:10:40</span><button class="btn act">Log it</button></div>
+  </section>
+  <section class="panel" aria-label="Today's log" style="align-self:start">
+    <div class="panel-head"><h2>Today's log</h2><span class="count num">3 logs, 3h 05m</span><div class="spacer"></div><button class="btn">Details</button></div>
+    <input class="input quick" placeholder="What did you work on?" aria-label="Quick log">
+    <div class="log"><span class="bar" style="background:var(--p-api)"></span>
+      <div><p>Added retry handling to the payment webhook and covered it with tests.</p>
+        <div class="meta small"><span>Billing API</span><span class="num">1h 40m</span><span class="badge">3 sub-tasks</span><span class="badge">Auto</span></div></div>
+      <button class="menu" aria-label="Log actions">⋯</button></div>
+    <div class="log"><span class="bar" style="background:var(--p-ui)"></span>
+      <div><p>Reworked the dashboard filter bar for narrow screens.</p>
+        <div class="meta small"><span>Dashboard</span><span class="num">0h 55m</span></div></div>
+      <button class="menu" aria-label="Log actions">⋯</button></div>
+    <div class="log"><span class="bar" style="background:var(--p-ops)"></span>
+      <div><p>Checked nightly backups and cleaned old build artefacts.</p>
+        <div class="meta small"><span>Operations</span><span class="num">0h 30m</span></div></div>
+      <button class="menu" aria-label="Log actions">⋯</button></div>
+    <div class="foot"><button class="btn">Standup</button><button class="btn">Sync</button><div class="spacer"></div><button class="btn primary" id="endBtn">End my day</button></div>
+  </section>
+ </div>
+</div>
+
+<!-- TASKS -->
+<div class="wrap" data-screen="tasks" hidden>
+  <section class="panel">
+    <div class="toolbar">
+      <input class="input" style="flex:1;min-width:220px" placeholder="New task" aria-label="New task">
+      <span class="select">Billing API</span>
+      <span class="select num">Today</span>
+      <button class="btn primary">Add task</button>
+    </div>
+    <div class="toolbar" style="padding-top:0">
+      <button class="chip" aria-pressed="true">All projects</button>
+      <button class="chip" aria-pressed="false"><span class="dot" style="background:var(--p-api)"></span> Billing API</button>
+      <button class="chip" aria-pressed="false"><span class="dot" style="background:var(--p-ui)"></span> Dashboard</button>
+      <button class="chip" aria-pressed="false"><span class="dot" style="background:var(--p-ops)"></span> Operations</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="group-head"><h3>Today</h3><span class="small num">Wed 18 Nov, 3 tasks</span></div>
+    <div class="row running"><span class="bar" style="background:var(--p-api)"></span>
+      <div><div class="title">Fix duplicate invoice rows in the export</div><div class="small">Billing API</div></div>
+      <span class="time num">00:34:19</span><button class="btn act">Pause</button></div>
+    <div class="row"><span class="bar" style="background:var(--p-ui)"></span>
+      <div><div class="title">Review the new filter bar spacing</div><div class="small">Dashboard</div></div>
+      <span class="time num">00:22:05</span><button class="btn act">Resume</button></div>
+    <div class="row"><span class="bar" style="background:var(--p-ops)"></span>
+      <div><div class="title">Rotate the staging database password</div><div class="small">Operations</div></div>
+      <span class="time num">Planned</span><button class="btn act">Start</button></div>
+
+    <div class="group-head"><h3>Earlier, Tue 17 Nov</h3><span class="small">2 tasks</span><div class="spacer"></div><button class="btn quiet">Move all to today</button></div>
+    <div class="row"><span class="bar" style="background:var(--p-api)"></span>
+      <div><div class="title">Check the refund edge cases</div><div class="small">Billing API</div></div>
+      <span class="time num">Planned</span><button class="btn act">Start</button></div>
+    <div class="row"><span class="bar" style="background:var(--p-ui)"></span>
+      <div><div class="title">Update the empty state copy</div><div class="small">Dashboard · Blocked</div></div>
+      <span class="time num">00:10:00</span><button class="btn act">Resume</button></div>
+
+    <div class="group-head"><h3>Upcoming</h3><span class="small">Thu 19 Nov, 1 task</span></div>
+    <div class="row"><span class="bar" style="background:var(--p-ops)"></span>
+      <div><div class="title">Renew the SSL certificate</div><div class="small">Operations</div></div>
+      <span class="time num">Planned</span><button class="btn act">Start</button></div>
+  </section>
+
+  <section class="panel">
+    <div class="group-head"><h3>Done recently</h3><span class="small">Select tasks to write a timesheet</span><div class="spacer"></div><button class="btn primary">Write timesheet</button></div>
+    <div class="row sel done"><input type="checkbox" checked aria-label="Select"><span class="bar" style="background:var(--p-api)"></span>
+      <div><div class="title">Write the token refresh test</div><div class="small">Billing API</div></div>
+      <span class="time num">01:10:40</span><button class="btn act">Log it</button></div>
+    <div class="row sel done"><input type="checkbox" aria-label="Select"><span class="bar" style="background:var(--p-ops)"></span>
+      <div><div class="title">Archive last month's reports</div><div class="small">Operations · logged</div></div>
+      <span class="time num">00:25:00</span><span class="badge">Logged</span></div>
+  </section>
+</div>
+
+<!-- HISTORY -->
+<div class="wrap" data-screen="history" hidden>
+  <section class="panel">
+    <div class="toolbar">
+      <span class="select num">12 Nov 2026</span><span class="small">to</span><span class="select num">18 Nov 2026</span>
+      <button class="chip" aria-pressed="false">Today</button><button class="chip" aria-pressed="false">Yesterday</button>
+      <button class="chip" aria-pressed="true">Last 7 days</button><button class="chip" aria-pressed="false">Last 30 days</button>
+    </div>
+    <div class="toolbar" style="padding-top:0">
+      <input class="input" style="flex:1;min-width:200px" placeholder="Search logs and tasks" aria-label="Search">
+      <span class="select">All projects</span>
+      <button class="btn">Sync</button><button class="btn">Export</button>
+    </div>
+    <div class="week" role="group" aria-label="Week">
+      <button class="wd" aria-pressed="false"><span class="small">Thu</span><span class="col"><i style="height:78%"></i></span><span class="small num">7h 10m</span></button>
+      <button class="wd" aria-pressed="false"><span class="small">Fri</span><span class="col"><i style="height:64%"></i></span><span class="small num">5h 55m</span></button>
+      <button class="wd" aria-pressed="false"><span class="small">Sat</span><span class="col"><i style="height:8%"></i></span><span class="small num">0h 40m</span></button>
+      <button class="wd" aria-pressed="false"><span class="small">Sun</span><span class="col"><i style="height:0%"></i></span><span class="small num">0h</span></button>
+      <button class="wd" aria-pressed="false"><span class="small">Mon</span><span class="col"><i style="height:90%"></i></span><span class="small num">8h 20m</span></button>
+      <button class="wd" aria-pressed="false"><span class="small">Tue</span><span class="col"><i style="height:82%"></i></span><span class="small num">7h 35m</span></button>
+      <button class="wd" aria-pressed="true"><span class="small">Wed</span><span class="col"><i style="height:42%"></i></span><span class="small num">3h 49m</span></button>
+    </div>
+    <div class="toolbar small" style="border-top:1px solid var(--border-app)">5 days, 28h 49m worked, 27h 30m logged, 24h 12m tracked</div>
+  </section>
+
+  <section class="panel">
+    <div class="day-head"><h3>Wednesday 18 Nov</h3><span class="small num">In 09:10, still working</span><span class="small num">Worked 3h 49m · Logged 3h 05m · Tracked 3h 30m</span></div>
+    <div class="sub">Logs (3)</div>
+    <div class="log"><span class="bar" style="background:var(--p-api)"></span><div><p>Added retry handling to the payment webhook and covered it with tests.</p><div class="meta small"><span>Billing API</span><span class="num">1h 40m</span></div></div><button class="menu" aria-label="Log actions">⋯</button></div>
+    <div class="log"><span class="bar" style="background:var(--p-ui)"></span><div><p>Reworked the dashboard filter bar for narrow screens.</p><div class="meta small"><span>Dashboard</span><span class="num">0h 55m</span></div></div><button class="menu" aria-label="Log actions">⋯</button></div>
+    <div class="sub">Done tasks (1)</div>
+    <div class="row done"><span class="bar" style="background:var(--p-api)"></span><div><div class="title">Write the token refresh test</div><div class="small">Billing API</div></div><span class="time num">01:10:40</span><span></span></div>
+
+    <div class="day-head"><h3>Tuesday 17 Nov</h3><span class="small num">09:05 to 17:20</span><span class="small num">Worked 7h 35m · Logged 7h 10m · Tracked 6h 50m</span></div>
+    <div class="sub">Logs (4)</div>
+    <div class="log"><span class="bar" style="background:var(--p-ops)"></span><div><p>Moved the nightly job to the new schedule and checked the first run.</p><div class="meta small"><span>Operations</span><span class="num">2h 05m</span></div></div><button class="menu" aria-label="Log actions">⋯</button></div>
+    <div class="log"><span class="bar" style="background:var(--p-api)"></span><div><p>Fixed rounding in the invoice totals.</p><div class="meta small"><span>Billing API</span><span class="num">3h 10m</span></div></div><button class="menu" aria-label="Log actions">⋯</button></div>
+    <div class="standup"><h4>Standup</h4><p>Yesterday I fixed rounding in the invoice totals and moved the nightly job to its new schedule. Today I'm continuing on the export duplicates. No blockers.</p></div>
+  </section>
+</div>
+
+<!-- SETTINGS -->
+<div class="wrap" data-screen="settings" hidden>
+ <div class="settings">
+  <nav class="anchors" aria-label="Settings sections">
+    <a href="#s-theme" class="on">Theme</a><a href="#s-office">Office day</a><a href="#s-ai">AI writer</a><a href="#s-projects">Projects and tags</a><a href="#s-phone">Phone and email</a><a href="#s-data">Data and backup</a><a href="#s-status">System status</a>
+  </nav>
+  <div>
+    <section class="panel" id="s-theme">
+      <div class="panel-head"><h2>Theme</h2></div>
+      <div class="themes">
+        <button class="theme" aria-pressed="false"><span class="swatch" style="background:#f4f1ea"><i style="background:#14210f"></i><b><em style="background:#3a7d44"></em><em style="background:#c9c3b5"></em></b></span><span>The Chase</span></button>
+        <button class="theme" aria-pressed="false"><span class="swatch" style="background:#fbfaf7"><i style="background:#e8e4da"></i><b><em style="background:#444"></em><em style="background:#bbb"></em></b></span><span>Time Card</span></button>
+        <button class="theme" aria-pressed="false"><span class="swatch" style="background:#16181d"><i style="background:#2c3038"></i><b><em style="background:#7cc4a4"></em><em style="background:#3a3f48"></em></b></span><span>Graphite Console</span></button>
+        <button class="theme" aria-pressed="true"><span class="swatch" style="background:#11141a"><i style="background:#1c212a"></i><b><em style="background:#e0b56b"></em><em style="background:#7aa2d6"></em><em style="background:#c98a9b"></em></b></span><span>Dusk</span></button>
+      </div>
+    </section>
+    <section class="panel" id="s-office">
+      <div class="panel-head"><h2>Office day</h2></div>
+      <div class="field"><div><p>Workday length</p><span class="small">Sets the time left and the leave time.</span></div><span class="select num">8 hours</span></div>
+      <div class="field"><div><p>Start-of-day prompt and automatic clock-out</p><span class="small">Suggests a clock-in time and closes a forgotten day.</span></div><button class="switch" role="switch" aria-checked="true" aria-label="Automatic day"></button></div>
+      <div class="field"><div><p>Clock-in message on WhatsApp</p><span class="small">Opens the chat with your message. You press Send.</span></div><button class="switch" role="switch" aria-checked="false" aria-label="WhatsApp message"></button></div>
+    </section>
+    <section class="panel" id="s-ai">
+      <div class="panel-head"><h2>AI writer</h2></div>
+      <div class="field"><div><p>Writes standups, timesheets and suggestions</p><span class="small">Claude Code uses your own sign-in. Gemini needs a key.</span></div><span class="select">Claude Code</span></div>
+      <div class="field"><div><p>Check my activity every 5 minutes</p><span class="small">Git commits and Claude Code prompts, today only.</span></div><button class="switch" role="switch" aria-checked="true" aria-label="Auto scan"></button></div>
+    </section>
+    <section class="panel" id="s-projects">
+      <div class="panel-head"><h2>Projects and tags</h2><div class="spacer"></div><button class="btn">New project</button></div>
+      <div class="field"><div style="display:flex;gap:12px;align-items:center"><span class="dot" style="background:var(--p-api)"></span><div><p>Billing API</p><span class="small">E:\work\billing-api</span></div></div><button class="btn quiet">Change</button></div>
+      <div class="field"><div style="display:flex;gap:12px;align-items:center"><span class="dot" style="background:var(--p-ui)"></span><div><p>Dashboard</p><span class="small">E:\work\dashboard</span></div></div><button class="btn quiet">Change</button></div>
+      <div class="field"><div style="display:flex;gap:12px;align-items:center"><span class="dot" style="background:var(--p-ops)"></span><div><p>Operations</p><span class="small">No folder linked</span></div></div><button class="btn quiet">Add folder</button></div>
+    </section>
+    <section class="panel" id="s-phone">
+      <div class="panel-head"><h2>Phone and email</h2></div>
+      <div class="field"><div><p>Evening email</p><span class="small">A daily summary sent to you at the time below.</span></div><span class="select num">18:00</span></div>
+      <div class="field"><div><p>Phone page PIN</p><span class="small">Add tasks from your phone. Use one computer only.</span></div><button class="btn">Set PIN</button></div>
+    </section>
+    <section class="panel" id="s-data">
+      <div class="panel-head"><h2>Data and backup</h2></div>
+      <div class="field"><div><p>Backup file</p><span class="small">Last backup today, 12:40. Disk copies and the Sheet keep their own.</span></div><span style="display:flex;gap:8px"><button class="btn">Back up now</button><button class="btn">Import</button></span></div>
+    </section>
+    <section class="panel" id="s-status">
+      <div class="panel-head"><h2>System status</h2></div>
+      <div class="field"><span class="status"><i></i>Saving to this browser</span><span class="small">Working</span></div>
+      <div class="field"><span class="status"><i></i>Disk copy</span><span class="small num">Saved 13:27</span></div>
+      <div class="field"><span class="status"><i class="warn"></i>Google Sheet backup</span><span class="small">Not saved for 2 hours. Retrying.</span></div>
+    </section>
+  </div>
+ </div>
+</div>
+
+<!-- END MY DAY -->
+<div class="scrim" id="endDlg" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-label="End my day">
+    <div class="panel-head"><h2>End my day</h2><div class="spacer"></div><button class="menu" id="endClose" aria-label="Close">✕</button></div>
+    <div class="steps">
+      <button class="step" aria-current="step">Suggested logs</button><button class="step">Today's log</button><button class="step">Sync</button><button class="step">Clock out</button>
+    </div>
+    <div style="padding:6px 0">
+      <div class="row sel"><input type="checkbox" checked aria-label="Select"><span class="bar" style="background:var(--p-api)"></span><div><div class="title">Fixed duplicate invoice rows in the export</div><div class="small">Billing API · 4 commits · estimated</div></div><span class="time num">0h 45m</span><span></span></div>
+      <div class="row sel"><input type="checkbox" checked aria-label="Select"><span class="bar" style="background:var(--p-ui)"></span><div><div class="title">Reviewed filter bar spacing</div><div class="small">Dashboard · done task</div></div><span class="time num">0h 22m</span><span></span></div>
+    </div>
+    <div class="foot"><button class="btn quiet">Skip</button><div class="spacer"></div><button class="btn primary">Add 2 logs</button></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var p = function (n) { return String(n).padStart(2, '0'); };
+  var hms = function (s) { return p(Math.floor(s / 3600)) + ':' + p(Math.floor(s % 3600 / 60)) + ':' + p(s % 60); };
+
+  /* Day scale: 09:00 to 18:00. Every position comes from real minutes, so ticks, bars and the marker line up. */
+  var START = 9 * 60, END = 18 * 60, IN = 9 * 60 + 10, LEAVE = 17 * 60 + 10;
+  var now = 13 * 3600 + 29 * 60 + 50, run = 34 * 60 + 19;
+  var segs = [
+    { s: 9 * 60 + 10, e: 11 * 60 + 10, c: 'var(--p-api)', n: 'Billing API' },
+    { s: 11 * 60 + 20, e: 12 * 60 + 5, c: 'var(--p-ui)', n: 'Dashboard' },
+    { s: 12 * 60 + 15, e: 12 * 60 + 45, c: 'var(--p-ops)', n: 'Operations' },
+    { s: 12 * 60 + 55, e: null, c: 'var(--p-api)', n: 'Billing API' }
+  ];
+  var pct = function (m) { return ((m - START) / (END - START) * 100).toFixed(3) + '%'; };
+  var tl = $('tl'), html = '';
+  html += '<div class="tl-window" style="left:' + pct(IN) + ';width:calc(' + pct(LEAVE) + ' - ' + pct(IN) + ')"></div>';
+  html += '<div class="tl-leave" style="left:' + pct(LEAVE) + '"></div><span class="tl-leave-label" style="left:' + pct(LEAVE) + '">Leave 17:10</span>';
+  for (var h = 9; h <= 18; h++) {
+    html += '<span class="tl-tick" style="left:' + pct(h * 60) + '"></span><span class="tl-hour num' + (h % 2 ? ' odd' : '') + '" style="left:' + pct(h * 60) + '">' + p(h) + '</span>';
+  }
+  segs.forEach(function (g, i) { html += '<div class="tl-seg" id="seg' + i + '"></div>'; });
+  html += '<div class="tl-now" id="tlNow"></div><span class="tl-now-label num" id="tlNowL"></span>';
+  tl.innerHTML = html;
+
+  function paint() {
+    var nm = now / 60, worked = 0, tot = {};
+    segs.forEach(function (g, i) {
+      var e = g.e === null ? nm : g.e, el = $('seg' + i);
+      el.style.left = pct(g.s); el.style.width = 'calc(' + pct(e) + ' - ' + pct(g.s) + ')'; el.style.background = g.c;
+      worked += e - g.s; tot[g.n] = (tot[g.n] || 0) + (e - g.s);
+    });
+    $('tlNow').style.left = pct(nm); $('tlNowL').style.left = pct(nm);
+    $('tlNowL').textContent = hms(now).slice(0, 5);
+    $('now').textContent = hms(now);
+    $('left').textContent = Math.floor((LEAVE * 60 - now) / 3600) + ':' + p(Math.floor((LEAVE * 60 - now) % 3600 / 60)) + ':' + p((LEAVE * 60 - now) % 60);
+    $('worked').textContent = Math.floor(worked / 60) + 'h ' + p(Math.floor(worked % 60)) + 'm';
+    $('runTime').textContent = hms(run);
+    var colors = { 'Billing API': 'var(--p-api)', 'Dashboard': 'var(--p-ui)', 'Operations': 'var(--p-ops)' };
+    $('legend').innerHTML = Object.keys(tot).map(function (k) {
+      return '<span><i class="dot" style="background:' + colors[k] + '"></i>' + k + ' <b class="num" style="color:var(--text-main);font-weight:500">' + Math.floor(tot[k] / 60) + 'h ' + p(Math.floor(tot[k] % 60)) + 'm</b></span>';
+    }).join('');
+  }
+  paint();
+  setInterval(function () { now++; run++; paint(); }, 1000);
+
+  /* Tabs */
+  var tabs = document.querySelectorAll('.tab');
+  function show(name) {
+    tabs.forEach(function (t) { t.toggleAttribute('aria-current', t.dataset.tab === name); if (t.dataset.tab === name) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current'); });
+    document.querySelectorAll('[data-screen]').forEach(function (s) { s.hidden = s.dataset.screen !== name; });
+    try { history.replaceState(null, '', '#' + name); } catch (e) {}
+  }
+  tabs.forEach(function (t) { t.addEventListener('click', function () { show(t.dataset.tab); }); });
+  var first = (location.hash || '').slice(1);
+  if (['today', 'tasks', 'history', 'settings'].indexOf(first) > -1) show(first);
+
+  /* Toggles, chips, week days, themes, switches */
+  document.querySelectorAll('.switch').forEach(function (b) { b.addEventListener('click', function () { b.setAttribute('aria-checked', b.getAttribute('aria-checked') !== 'true'); }); });
+  function single(sel) { document.querySelectorAll(sel).forEach(function (b) { b.addEventListener('click', function () { b.parentElement.querySelectorAll(sel).forEach(function (o) { o.setAttribute('aria-pressed', o === b); }); }); }); }
+  single('.chip'); single('.wd'); single('.theme');
+  var fb = $('focusBtn');
+  fb.addEventListener('click', function () { var on = document.body.classList.toggle('focus'); fb.setAttribute('aria-pressed', on); });
+
+  /* End my day dialog */
+  var dlg = $('endDlg');
+  $('endBtn').addEventListener('click', function () { dlg.hidden = false; });
+  $('endClose').addEventListener('click', function () { dlg.hidden = true; });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') dlg.hidden = true; });
+  document.querySelectorAll('.step').forEach(function (s) { s.addEventListener('click', function () { document.querySelectorAll('.step').forEach(function (o) { o.removeAttribute('aria-current'); }); s.setAttribute('aria-current', 'step'); }); });
+})();
+</script>
+</body>
+</html>

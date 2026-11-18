@@ -7,7 +7,6 @@ import type { DayHistoryRow, StandupRow } from '../phoneApi';
 
 export const DELIVERY_KEY = 'workpulse_delivery';
 export const DELIVERY_CATCH_UP_DAYS = 7;
-export const EMAIL_DELAY_MINUTES = 30;
 
 export interface DeliveryEntry {
   /** 'queued': the Sheet has the rows and the email is booked (or sent); the day is not looked at again. */

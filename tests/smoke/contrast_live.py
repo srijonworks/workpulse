@@ -5,7 +5,7 @@ For each element that directly holds text, it composites the real computed backg
 (4.5:1, or 3:1 for large text: >=24px, or >=18.66px and bold).
 
 Usage (server already running):  python tests/smoke/contrast_live.py [--url URL] [--json OUT] [--tabs feed,backlog] [--verbose]
-Or with its own server:          python .claude/skills/webapp-testing/scripts/with_server.py --server "npm run dev" --port 3000 --timeout 60 -- python tests/smoke/contrast_live.py
+Or with its own server:          python .claude/skills/webapp-testing/scripts/with_server.py --server "npm run dev" --port 3737 --timeout 60 -- python tests/smoke/contrast_live.py
 
 It is a regression gate, not a verdict: it cannot see text over gradients or images, and
 it counts each failing element once. Exit code is always 0; read the numbers.
@@ -60,7 +60,7 @@ SKIPPED_JS = "() => { const n = window.__skipped||0; window.__skipped = 0; retur
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--url", default=os.environ.get("WP_URL", "http://localhost:3000"))
+    ap.add_argument("--url", default=os.environ.get("WP_URL", "http://localhost:3737"))
     ap.add_argument("--json", default="")
     ap.add_argument("--tabs", default="feed,backlog,analytics,settings")
     ap.add_argument("--verbose", action="store_true")
