@@ -110,12 +110,22 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
   const now = useNow(30_000);
   const [query, setQuery] = useState('');
   const [projectId, setProjectId] = useState('all');
+  // The last day of a range that starts at the picked day. '' = one day only.
+  const [rangeEnd, setRangeEnd] = useState('');
+  const to = rangeEnd && rangeEnd > selectedDay && rangeEnd <= today ? rangeEnd : '';
+  const isRange = to !== '';
+  /** Picks one day (clears the range). */
+  const pickDay = (d: string) => {
+    setRangeEnd('');
+    onSelectDay(d);
+  };
 
   // A log picked in the search palette: show its day with no search or project filter, then scroll to it.
   const [scrollTo, setScrollTo] = useState<string | null>(null);
   useEffect(() => {
     if (!focusDate || !focusLogId) return;
     setAnchor(focusDate);
+    setRangeEnd('');
     onSelectDay(focusDate);
     setQuery('');
     setProjectId('all');
@@ -139,14 +149,14 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
   const filterProjects = projects.filter((p) => usedIds.has(p.id));
   const activeProject = projectId !== 'all' && usedIds.has(projectId) ? projectId : 'all';
 
-  // A search looks through every week; otherwise the list is the strip's week (or its picked day).
+  // A search looks through every date. Otherwise the list is the picked range; one picked day has only its own panel.
   const searching = query.trim() !== '';
   const shown = useMemo(() => {
     const hits = filterLogs(logs, { ...NO_FILTERS, query, projectId: activeProject }, today);
     if (searching) return hits;
-    // The picked day has its own panel; this list is the rest of the week.
-    return hits.filter((l) => l.date >= days[0] && l.date <= days[6] && l.date !== selectedDay);
-  }, [logs, query, activeProject, today, searching, selectedDay, days]);
+    if (!isRange) return [];
+    return hits.filter((l) => l.date >= selectedDay && l.date <= to);
+  }, [logs, query, activeProject, today, searching, isRange, selectedDay, to]);
 
   const groups = useMemo(() => {
     const map = new Map<string, WorkLog[]>();
@@ -187,7 +197,7 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
   const onQuery = (value: string) => {
     const date = parseDateQuery(value, today);
     if (date) {
-      onSelectDay(date);
+      pickDay(date);
       setQuery('');
     } else setQuery(value);
   };
@@ -207,18 +217,31 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
     );
   };
 
-  const stamp = today;
+  const stamp = isRange ? `${selectedDay}_to_${to}` : today;
+  // Export follows what is on screen: the search hits, the picked range, or else the picked day.
+  const exportList = searching || isRange ? shown : summary.logs;
   const exportItems = [
-    { label: 'Download CSV', onSelect: () => download(logsToCsv(logs), `workpulse-logs-${stamp}.csv`) },
-    { label: 'Copy as Markdown', onSelect: () => onCopy(logsToMarkdown(logs, projects)) },
+    { label: 'Download CSV', onSelect: () => download(logsToCsv(exportList), `workpulse-logs-${stamp}.csv`) },
+    { label: 'Copy as Markdown', onSelect: () => onCopy(logsToMarkdown(exportList, projects)) },
     { label: 'Print', onSelect: () => window.print() },
   ];
+
+  // One range's figures: logs, time and the days that have any.
+  const rangeFigures = useMemo(() => {
+    if (!isRange) return null;
+    const inRange = logs.filter((l) => l.date >= selectedDay && l.date <= to);
+    return {
+      count: inRange.length,
+      minutes: inRange.reduce((sum, l) => sum + (l.durationMinutes ?? 0), 0),
+      days: new Set(inRange.map((l) => l.date)).size,
+    };
+  }, [logs, isRange, selectedDay, to]);
 
   const emptyText = searching
     ? `No logs match “${query.trim()}”.`
     : logs.length === 0
-      ? 'No logs yet. What you log on Today shows up here, a week at a time.'
-      : 'No logs on the other days of this week.';
+      ? 'No logs yet. What you log on Today shows up here.'
+      : `No logs from ${dayLabelLong(selectedDay)} to ${dayLabelLong(to)}.`;
 
   return (
     <div className="v2-history mx-auto max-w-[960px] px-4 sm:px-8 py-6 sm:py-7 flex flex-col gap-7">
@@ -231,7 +254,7 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
           days={totals}
           projects={projects}
           selected={selectedDay}
-          onSelectDay={(d) => d && onSelectDay(d)}
+          onSelectDay={(d) => d && pickDay(d)}
           onPrevWeek={() => moveWeek(-1)}
           onNextWeek={() => moveWeek(1)}
           label={label}
@@ -243,39 +266,87 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
 
       <section aria-labelledby={`${id}-day`} className="flex flex-col gap-4">
         <h2 id={`${id}-day`} className="v2-head">
-          <span>{selectedDay === today ? `Today · ${dayLabelLong(selectedDay)}` : dayLabelLong(selectedDay)}</span>
-          <span className="v2-head-meta num">{plural(summary.logs.length)}</span>
+          <span>
+            {isRange
+              ? `${dayLabelLong(selectedDay)} – ${dayLabelLong(to)}`
+              : selectedDay === today
+                ? `Today · ${dayLabelLong(selectedDay)}`
+                : dayLabelLong(selectedDay)}
+          </span>
+          <span className="v2-head-meta num">{plural(isRange ? (rangeFigures?.count ?? 0) : summary.logs.length)}</span>
         </h2>
 
         <div className="no-print flex flex-wrap items-end gap-3">
           <div>
             <label htmlFor={`${id}-date`} className={LABEL}>
-              Day
+              {isRange ? 'From' : 'Day'}
             </label>
             <DatePicker id={`${id}-date`} value={selectedDay} max={today} onChange={(v) => v && onSelectDay(v)} className="min-w-[11rem]" />
           </div>
-          <button type="button" onClick={() => onSelectDay(today)} className="v2-btn min-h-11 px-4 cursor-pointer">
-            Today
-          </button>
-          <button type="button" onClick={() => onSelectDay(addDays(today, -1))} className="v2-btn min-h-11 px-4 cursor-pointer">
-            Yesterday
-          </button>
-          <div className="ml-auto">
-            <RowMenu
-              label="Export this day"
-              buttonText="Export this day"
-              items={[
-                { label: 'Download CSV', onSelect: () => download(dayToCsv(summary), `workpulse-${selectedDay}.csv`) },
-                { label: 'Copy as Markdown', onSelect: () => onCopy(dayToMarkdown(summary, projects, standup)) },
-                {
-                  label: 'Download Markdown',
-                  onSelect: () => download(dayToMarkdown(summary, projects, standup), `workpulse-${selectedDay}.md`, 'text/markdown'),
-                },
-              ]}
+          <div>
+            <label htmlFor={`${id}-to`} className={LABEL}>
+              To (optional)
+            </label>
+            <DatePicker
+              id={`${id}-to`}
+              value={to}
+              min={addDays(selectedDay, 1)}
+              max={today}
+              clearable
+              placeholder="One day only"
+              onChange={setRangeEnd}
+              className="min-w-[11rem]"
             />
           </div>
+          <button type="button" onClick={() => pickDay(today)} className="v2-btn min-h-11 px-4 cursor-pointer">
+            Today
+          </button>
+          <button type="button" onClick={() => pickDay(addDays(today, -1))} className="v2-btn min-h-11 px-4 cursor-pointer">
+            Yesterday
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setRangeEnd(today);
+              onSelectDay(addDays(today, -6));
+            }}
+            className="v2-btn min-h-11 px-4 cursor-pointer"
+          >
+            Last 7 days
+          </button>
+          {!isRange && (
+            <div className="ml-auto">
+              <RowMenu
+                label="Export this day"
+                buttonText="Export this day"
+                items={[
+                  { label: 'Download CSV', onSelect: () => download(dayToCsv(summary), `workpulse-${selectedDay}.csv`) },
+                  { label: 'Copy as Markdown', onSelect: () => onCopy(dayToMarkdown(summary, projects, standup)) },
+                  {
+                    label: 'Download Markdown',
+                    onSelect: () => download(dayToMarkdown(summary, projects, standup), `workpulse-${selectedDay}.md`, 'text/markdown'),
+                  },
+                ]}
+              />
+            </div>
+          )}
         </div>
 
+        {isRange && rangeFigures ? (
+          <dl className="v2-panel v2-row v2-inset grid grid-cols-3 gap-x-4 gap-y-3 text-[length:var(--fs-small)]">
+            {[
+              ['Logs', String(rangeFigures.count)],
+              ['Logged', formatMinutes(rangeFigures.minutes)],
+              ['Days with logs', String(rangeFigures.days)],
+            ].map(([k, v]) => (
+              <div key={k}>
+                <dt className="text-[var(--text-muted)]">{k}</dt>
+                <dd className="num text-[length:var(--fs-body)] font-semibold text-[var(--text-main)]">{v}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <>
         <dl className="v2-panel v2-row v2-inset grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-5 text-[length:var(--fs-small)]">
           {[
             ['Clocked in', summary.clockIn ? timeOf(summary.clockIn) : 'No clock-in'],
@@ -365,14 +436,16 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
             <RichText text={standup} className="v2-panel v2-row v2-inset text-[length:var(--fs-body)]" />
           </div>
         )}
+          </>
+        )}
       </section>
 
       <section aria-labelledby={`${id}-logs`} className="flex flex-col gap-4">
         <h2 id={`${id}-logs`} className="v2-head">
           <span>Logs</span>
           <span className="v2-head-meta num">
-            {plural(shown.length)}
-            {searching ? ' in all weeks' : ' on the other days'}
+            {searching || isRange ? plural(shown.length) : ''}
+            {searching ? ' on all dates' : isRange ? ' in this range' : ''}
           </span>
         </h2>
 
@@ -404,11 +477,15 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
           </div>
           <div className="flex justify-end gap-2">
             <SyncButton {...sync} />
-            <RowMenu label="Export all logs" buttonText="Export" items={exportItems} />
+            <RowMenu label="Export logs" buttonText="Export" items={exportItems} />
           </div>
         </div>
 
-        {groups.length === 0 ? (
+        {!searching && !isRange ? (
+          <p className="text-[length:var(--fs-small)] text-[var(--text-muted)]">
+            Showing {dayLabelLong(selectedDay)} only. Pick an end date above to list a range, or search to look through every date.
+          </p>
+        ) : groups.length === 0 ? (
           <div className="v2-panel v2-row v2-inset flex flex-wrap items-center gap-x-4 gap-y-1">
             <p className="text-[length:var(--fs-body)] text-[var(--text-muted)]">{emptyText}</p>
             {searching && (

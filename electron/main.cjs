@@ -139,9 +139,11 @@ function setUpdateState(patch) {
   if (win && !win.isDestroyed()) win.webContents.send('wp:update', updateState);
 }
 
+// Silent and unattended: no installer window, no "next next". The installer replaces the files for this user (no admin needed)
+// and starts WorkPulse again by itself. Data lives in userData and the browser origin, which an install never touches.
 function installUpdate() {
   quitting = true;
-  updater.quitAndInstall();
+  updater.quitAndInstall(true, true);
 }
 
 function setupUpdates() {

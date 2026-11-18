@@ -19,8 +19,12 @@ Run the newest `WorkPulse Setup <version>.exe` in `C:\Users\DELL\wp-release`. Wi
 2. Run `npm run desktop:build`. It builds the page, bundles the server, raises the version (1.0.1, 1.0.2, ...) and writes the installer
    plus `latest.yml` into `~\wp-release` (`C:\Users\DELL\wp-release` here).
 3. The installed app checks that folder when it starts and every 30 minutes (a tiny server on 127.0.0.1:38418 serves it, only on this PC),
-   downloads the new version and asks **Restart now / Later**. "Later" installs it the next time the app quits. Tray menu -> **Check for
+   downloads the new version and asks **Restart now / Later**. **Restart now** installs silently (`quitAndInstall(true, true)`: no installer
+   window, no admin prompt) and starts the app again. "Later" installs it the next time the app quits. Tray menu -> **Check for
    updates** checks at once. Your data stays.
+- The installer is **one click and per user** (`nsis.oneClick`, `perMachine: false`): it installs to `%LOCALAPPDATA%\Programs\WorkPulse` with
+  no admin rights, so later updates can be silent. An older all-users install (in `C:\Program Files`) needs a one-time switch: uninstall it,
+  then run the new `WorkPulse Setup <version>.exe` once. Data is kept (it lives in `AppData\Roaming\WorkPulse` and the fixed port).
 - The first installer that has the updater is 1.0.1 or newer: install it by hand once, the rest is one click.
 - `npm run desktop:pack` makes only the unpacked folder (`wp-release\win-unpacked\WorkPulse.exe`) for a quick test.
 - Build notes: `scripts/electron-builder.mjs` keeps its work folders in your home folder, not the repo: `~\wp-electron` (a copy of the

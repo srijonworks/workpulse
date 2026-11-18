@@ -83,7 +83,7 @@ SEL = {
     # History
     "week_group": re.compile(r"^Logged time per day"),
     "logs_region": re.compile(r"^Logs"),
-    "export": "Export all logs",
+    "export": "Export logs",
     "export_items": ("Download CSV", "Copy as Markdown", "Print"),
     # Settings
     "theme_group": "Theme",
@@ -840,6 +840,47 @@ def history_week(s):
         expect(menu.get_by_role("menuitem", name=item)).to_be_visible()
     p.keyboard.press("Escape")
     expect(menu).to_have_count(0)
+    s.no_errors()
+
+
+@check("history_date_range")
+def history_date_range(s):
+    """One picked day shows only that day; an end date lists every log in the range, and Export follows it."""
+    p = s.page
+    quick_log(s, "Smoke range today")
+    logs = s.ls("workpulse_logs")
+    base = {"time": "10:00", "projectId": "proj-1", "projectName": "General", "status": "Completed", "tags": [],
+            "durationMinutes": 30, "createdAt": "2026-01-01T00:00:00.000Z"}
+    days = {n: s.day(-n) for n in (1, 3, 5)}
+    for n, d in days.items():
+        logs.append(dict(base, id=f"log-17000000000{n}-rng", date=d, description=f"Smoke range day {n}"))
+    s.ctx.add_init_script(
+        "try{ if(!sessionStorage.getItem('smoke_range')){ sessionStorage.setItem('smoke_range','1');"
+        " localStorage.setItem('workpulse_logs', %s) } }catch(e){}" % json.dumps(json.dumps(logs)))
+    s.reload()
+    s.tab("history")
+    main = p.locator("main")
+    # one day: today's log only, nothing from other days below it
+    expect(main.get_by_text("Smoke range today")).to_be_visible(timeout=5000)
+    expect(main.get_by_text("Smoke range day 1")).to_have_count(0)
+    expect(main.get_by_text("Showing", exact=False).first).to_be_visible()
+    # a range: From three days back to today
+    pick_date(p, p.locator("button[aria-haspopup=dialog][data-value]").nth(0), days[3])
+    pick_date(p, p.locator("button[aria-haspopup=dialog]").nth(1), s.day(0))
+    expect(main.get_by_text("Smoke range day 1")).to_be_visible(timeout=5000)
+    expect(main.get_by_text("Smoke range day 3")).to_be_visible()
+    expect(main.get_by_text("Smoke range today")).to_be_visible()
+    expect(main.get_by_text("Smoke range day 5")).to_have_count(0)  # before the range
+    # Export follows the range
+    btn(p, SEL["export"]).click()
+    with p.expect_download() as dl:
+        p.get_by_role("menu").get_by_role("menuitem", name="Download CSV").click()
+    csv_text = open(dl.value.path(), encoding="utf-8").read()
+    assert "Smoke range day 1" in csv_text and "Smoke range day 3" in csv_text, "the export is missing logs of the range"
+    assert "Smoke range day 5" not in csv_text, "the export has a log from outside the range"
+    # Today puts it back to one day
+    btn(p, "Today", exact=True).click()
+    expect(main.get_by_text("Smoke range day 1")).to_have_count(0)
     s.no_errors()
 
 
