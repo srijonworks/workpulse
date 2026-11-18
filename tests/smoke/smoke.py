@@ -888,6 +888,11 @@ def history_date_range(s):
     csv_text = open(dl.value.path(), encoding="utf-8").read()
     assert "Smoke range day 1" in csv_text and "Smoke range day 3" in csv_text, "the export is missing logs of the range"
     assert "Smoke range day 5" not in csv_text, "the export has a log from outside the range"
+    # one standup for the listed days opens the standup window
+    btn(bar, "Standup for these days").click()
+    expect(p.get_by_role("dialog")).to_be_visible(timeout=5000)
+    p.keyboard.press("Escape")
+    expect(p.get_by_role("dialog")).to_have_count(0)
     # a search stays inside the dates ...
     bar.get_by_label("Search", exact=True).fill("day 5")
     expect(main.get_by_text("Smoke range day 5")).to_have_count(0)

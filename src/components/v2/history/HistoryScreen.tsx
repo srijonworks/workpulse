@@ -7,6 +7,7 @@ import { addDays, localDateStr, localTimeStr } from '../../../utils/dates';
 import { weekDays, weekTotals } from '../../../utils/weekTotals';
 import { dayLabelLong } from '../../../utils/taskSections';
 import { logsToCsv, logsToMarkdown } from '../../../utils/exportLogs';
+import type { ReportPeriod } from '../../../utils/aiGenerator';
 import { hm, parseDateQuery, rangeToMarkdown, summarizeRange, type DaySummary } from '../../../utils/historyDay';
 import { sameTasksIgnoringLiveTime } from '../../../utils/timerStore';
 import { useNow } from '../useNow';
@@ -49,6 +50,8 @@ export interface HistoryScreenProps {
   onClearSelection(): void;
   /** Open the standup dialog for the selected logs. */
   onStandup(): void;
+  /** Writes one standup for the listed logs, naming the days they cover. */
+  onStandupForRange(ids: string[], period: ReportPeriod): void;
   onOpenImage(base64: string): void;
   /** The Sync button's state (memoized in App). */
   sync: SyncState;
@@ -107,6 +110,7 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
   onSelectMany,
   onClearSelection,
   onStandup,
+  onStandupForRange,
   onOpenImage,
   sync,
   focusDate,
@@ -320,7 +324,23 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
               options={[{ value: 'all', label: 'All projects' }, ...filterProjects.map((p) => ({ value: p.id, label: p.name }))]}
             />
           </div>
-          <div className="flex items-end justify-end gap-2">
+          <div className="flex flex-wrap items-end justify-end gap-2">
+            <button
+              type="button"
+              disabled={shownIds.length === 0}
+              onClick={() => {
+                const first = result.days[result.days.length - 1].date;
+                const last = result.days[0].date;
+                onStandupForRange(shownIds, {
+                  from: first,
+                  to: last,
+                  label: first === last ? dayLabelLong(first) : `${dayLabelLong(first)} to ${dayLabelLong(last)}`,
+                });
+              }}
+              className={`${BTN} disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
+              {single ? 'Standup for this day' : 'Standup for these days'}
+            </button>
             <SyncButton {...sync} />
             <RowMenu
               label="Export logs"

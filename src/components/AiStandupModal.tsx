@@ -5,7 +5,8 @@ import { plainAiMessage } from '../utils/aiErrors';
 import { IconButton } from './ui/IconButton';
 import { localDateStr } from '../utils/dates';
 import { WorkLog, ReportFormat, ReportTone } from '../types';
-import { generateAiReport, GenerateReportResult } from '../utils/aiGenerator';
+import { generateAiReport, GenerateReportResult, type ReportPeriod } from '../utils/aiGenerator';
+import { standupContext } from '../utils/standup';
 import { aiWriterName } from '../utils/activity/settings';
 import type { ActivityAi } from '../utils/activity/types';
 import { modelLabel } from '../utils/geminiModels';
@@ -26,6 +27,8 @@ interface AiStandupModalProps {
   onClose: () => void;
   logs: WorkLog[];
   selectedLogIds: string[];
+  /** The days the logs cover, when they are not just today (History's "Standup for these days"). */
+  period?: ReportPeriod;
   /** Who writes the text (the AI writer setting). */
   ai: ActivityAi;
   /** Only sent to the server when `ai` is 'gemini'. */
@@ -40,6 +43,7 @@ export const AiStandupModal: React.FC<AiStandupModalProps> = ({
   onClose,
   logs,
   selectedLogIds,
+  period,
   ai,
   geminiApiKey,
   defaultRecipientName,
@@ -97,6 +101,7 @@ export const AiStandupModal: React.FC<AiStandupModalProps> = ({
         ai,
         customApiKey: geminiApiKey,
         recipientName: recipientName.trim() || undefined,
+        ...(period ? { period, context: standupContext({ logs: activeLogs, tasks: [], from: period.from, to: period.to }) } : {}),
       });
       setGeneratedReport(result.text);
       setGenerationSource(result.source);

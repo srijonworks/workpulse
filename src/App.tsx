@@ -86,6 +86,7 @@ import type { StepId } from './utils/endDaySteps';
 
 // Dialogs and notices kept from v1
 import { AiStandupModal } from './components/AiStandupModal';
+import type { ReportPeriod } from './utils/aiGenerator';
 import { SearchPaletteModal } from './components/SearchPaletteModal';
 import { LightboxModal } from './components/LightboxModal';
 import { ToastContainer } from './components/ToastContainer';
@@ -162,6 +163,7 @@ export default function App() {
 
   // Dialogs
   const [isAiStandupOpen, setIsAiStandupOpen] = useState(false);
+  const [standupRange, setStandupRange] = useState<ReportPeriod | undefined>(undefined);
   const [isEodSynthesizerOpen, setIsEodSynthesizerOpen] = useState(false);
   const [eodTasksSnapshot, setEodTasksSnapshot] = useState<BacklogTask[]>([]);
   const [isEodCustomSelection, setIsEodCustomSelection] = useState(false);
@@ -1702,10 +1704,20 @@ export default function App() {
     toggleSelectLog: useStableCallback(handleToggleSelectLog),
     selectLogs: useStableCallback((ids: string[]) => setSelectedLogIds(ids)),
     clearLogSelection: useStableCallback(() => setSelectedLogIds([])),
-    standup: useStableCallback(() => setIsAiStandupOpen(true)),
+    standup: useStableCallback(() => {
+      setStandupRange(undefined);
+      setIsAiStandupOpen(true);
+    }),
+    // History's "Standup for these days": the listed logs become the selection and the days they cover are named.
+    standupForRange: useStableCallback((ids: string[], period: ReportPeriod) => {
+      setSelectedLogIds(ids);
+      setStandupRange(period);
+      setIsAiStandupOpen(true);
+    }),
     // Today's log "Standup": the day's logs become the selection, as a History selection would.
     standupToday: useStableCallback(() => {
       setSelectedLogIds(logs.filter((l) => l.date === localDateStr()).map((l) => l.id));
+      setStandupRange(undefined);
       setIsAiStandupOpen(true);
     }),
     openImage: useStableCallback((base64: string) => setActiveLightboxImage(base64)),
@@ -1892,6 +1904,7 @@ export default function App() {
             onSelectMany={h.selectLogs}
             onClearSelection={h.clearLogSelection}
             onStandup={h.standup}
+            onStandupForRange={h.standupForRange}
             onOpenImage={h.openImage}
             sync={sync}
             focusDate={historyFocus?.date}
@@ -2072,6 +2085,7 @@ export default function App() {
         onClose={() => setIsAiStandupOpen(false)}
         logs={logs}
         selectedLogIds={selectedLogIds}
+        period={standupRange}
         ai={ai}
         geminiApiKey={settings.geminiApiKey}
         defaultRecipientName={settings.defaultRecipientName}
