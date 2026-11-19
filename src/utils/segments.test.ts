@@ -1,6 +1,6 @@
 process.env.TZ = 'Asia/Dhaka';
 import { describe, it, expect } from 'vitest';
-import { startSegment, endSegment, ensureOpenSegment, buildOvers, splitSegmentsAtGap, workBuckets } from './segments';
+import { startSegment, endSegment, ensureOpenSegment, buildOvers, pauseRunningAt, splitSegmentsAtGap, workBuckets } from './segments';
 import type { BacklogTask, Project } from '../types';
 
 const task = (over: Partial<BacklogTask> = {}): BacklogTask => ({
@@ -178,5 +178,34 @@ describe('segmentSecondsInRange', () => {
     const t = task({ segments: [{ start: at('09:00'), end: at('10:00') }] });
     expect(segmentSecondsInRange([t], ms('12:00'), to, ms('13:00'))).toBe(0);
     expect(segmentSecondsInRange([task()], from, to, ms('13:00'))).toBe(0);
+  });
+});
+
+describe('pauseRunningAt (clock-out)', () => {
+  it('pauses every running task at the clock-out and leaves the others alone', () => {
+    const running = task({ id: 'r', stage: 'in_progress', isRunning: true, elapsedSeconds: 3600, segments: [{ start: at('09:00') }] });
+    const planned = task({ id: 'p', stage: 'planned' });
+    const out = pauseRunningAt([running, planned], at('10:00'), ms('10:00'));
+    expect(out[0]).toMatchObject({ stage: 'paused', isRunning: false, elapsedSeconds: 3600, segments: [{ start: at('09:00'), end: at('10:00') }] });
+    expect(out[1]).toBe(planned);
+  });
+
+  it('takes back the seconds counted after a clock-out stamped in the past', () => {
+    const running = task({ stage: 'in_progress', isRunning: true, elapsedSeconds: 3 * 3600, segments: [{ start: at('09:00') }] });
+    const [t] = pauseRunningAt([running], at('11:00'), ms('12:00'));
+    expect(t.elapsedSeconds).toBe(2 * 3600);
+    expect(t.segments?.[0].end).toBe(at('11:00'));
+  });
+
+  it('never takes back time from before the open segment started', () => {
+    const running = task({ stage: 'in_progress', isRunning: true, elapsedSeconds: 7200, segments: [{ start: at('11:30') }] });
+    const [t] = pauseRunningAt([running], at('11:00'), ms('12:00'));
+    expect(t.elapsedSeconds).toBe(7200 - 1800);
+    expect(t.segments?.[0].end).toBe(at('11:30'));
+  });
+
+  it('returns the same array when nothing runs', () => {
+    const list = [task({ stage: 'paused' })];
+    expect(pauseRunningAt(list, at('10:00'), ms('10:00'))).toBe(list);
   });
 });

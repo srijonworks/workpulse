@@ -30,7 +30,7 @@ import {
 import { buildBackup, downloadTextFile, parseBackup } from './utils/backup';
 import { loggedSecondsOf, unloggedSeconds, isPendingTask, isDoneUnlogged, markTasksLogged } from './utils/taskLogging';
 import { advanceClock, MAX_TICK_GAP_SECONDS } from './utils/timer';
-import { startSegment, endSegment, splitSegmentsAtGap } from './utils/segments';
+import { startSegment, endSegment, pauseRunningAt, splitSegmentsAtGap } from './utils/segments';
 import { moveRunningToDay, moveTasksToDay } from './utils/taskDates';
 import { minutesFromSeconds } from './utils/duration';
 import { unsyncedLogs } from './utils/syncStatus';
@@ -540,6 +540,21 @@ export default function App() {
     addToast(summary);
   };
 
+  // Clocking out pauses every running timer at that time; they stay paused until the user resumes them (Resume of the day does not).
+  const pauseRunningForClockOut = (atIso: string): number => {
+    const count = backlogRef.current.filter((t) => t.stage === 'in_progress' || t.isRunning).length;
+    if (count === 0) return 0;
+    const nowMs = Date.now();
+    setBacklog((prev) => {
+      const next = pauseRunningAt(prev, atIso, nowMs);
+      if (next !== prev) saveBacklog(next);
+      return next;
+    });
+    return count;
+  };
+
+  const pausedNote = (n: number) => (n === 0 ? '' : ` ${n === 1 ? 'The running task was' : `${n} running tasks were`} paused.`);
+
   const handleClockOut = (date: string) => {
     const at = new Date().toISOString();
     setWorkdays((prev) => {
@@ -547,6 +562,8 @@ export default function App() {
       if (next !== prev) saveWorkdays(next);
       return next;
     });
+    const paused = pauseRunningForClockOut(at);
+    if (paused > 0) addToast(`Clocked out.${pausedNote(paused)}`, 'info');
   };
 
   // The safety net closed a day (see hooks/useAutoDay): the time is the last time the PC was in use, not now.
@@ -556,7 +573,8 @@ export default function App() {
       if (next !== prev) saveWorkdays(next);
       return next;
     });
-    addToast(`${date === localDateStr() ? 'Today' : date} was closed automatically at ${localTimeStr(new Date(atIso))}. Use Resume to reopen it.`, 'info');
+    const paused = pauseRunningForClockOut(atIso);
+    addToast(`${date === localDateStr() ? 'Today' : date} was closed automatically at ${localTimeStr(new Date(atIso))}.${pausedNote(paused)} Use Resume to reopen it.`, 'info');
   };
 
   const handleResume = (date: string) => {

@@ -26,6 +26,27 @@ export function endSegment(t: BacklogTask, nowIso: string): BacklogTask {
   return { ...t, segments };
 }
 
+// Clock-out: every running task is paused at the clock-out time and stays paused until the user resumes it. When the clock-out
+// is in the past (the automatic one, stamped at the last time the PC was in use), the seconds the clock counted after it, within
+// the open segment, are taken back. Returns the same array when nothing was running.
+export function pauseRunningAt(tasks: BacklogTask[], atIso: string, nowMs: number): BacklogTask[] {
+  const atMs = Date.parse(atIso);
+  if (!tasks.some((t) => t.stage === 'in_progress' || t.isRunning)) return tasks;
+  return tasks.map((t) => {
+    if (t.stage !== 'in_progress' && !t.isRunning) return t;
+    const open = t.segments && hasOpenSegment(t.segments) ? Date.parse(t.segments[t.segments.length - 1].start) : NaN;
+    const stopMs = Number.isFinite(open) ? Math.max(open, atMs) : atMs;
+    const extra = Number.isFinite(stopMs) ? Math.max(0, Math.floor((nowMs - stopMs) / 1000)) : 0;
+    const paused: BacklogTask = {
+      ...t,
+      stage: t.stage === 'in_progress' ? 'paused' : t.stage,
+      isRunning: false,
+      elapsedSeconds: Math.max(0, (t.elapsedSeconds || 0) - extra),
+    };
+    return endSegment(paused, Number.isFinite(stopMs) ? new Date(stopMs).toISOString() : new Date(nowMs).toISOString());
+  });
+}
+
 // A running task with no open segment (its clock ran before segments existed) gets one starting now.
 export function ensureOpenSegment(t: BacklogTask, nowIso: string): BacklogTask {
   return hasOpenSegment(t.segments) ? t : startSegment(t, nowIso);
