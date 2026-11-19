@@ -1631,7 +1631,8 @@ export default function App() {
 
   // Opens the suggestions: on a wide screen the Today card (scrolled into view), under 1024 px the
   // dialog, because the card sits at the bottom of the single column there.
-  const showSuggestions = () => {
+  // `check`: also press the card's own "Check activity" button when it is showing (nothing was checked yet today, so no edits can be lost).
+  const showSuggestions = (check = false) => {
     if (window.innerWidth < 1024) {
       setIsActivityOpen(true);
       return;
@@ -1643,6 +1644,14 @@ export default function App() {
       const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' });
       el.querySelector<HTMLElement>('h2')?.focus();
+      // A visible answer even when the card was already on screen.
+      el.classList.remove('log-flash');
+      void el.offsetWidth;
+      el.classList.add('log-flash');
+      setTimeout(() => el.classList.remove('log-flash'), 1700);
+      if (check) {
+        Array.from(el.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.trim() === 'Check activity')?.click();
+      }
     }, 50);
   };
 
@@ -1655,8 +1664,10 @@ export default function App() {
         setEndDay({});
         return;
       case 'review-suggestions':
-      case 'check-activity':
         showSuggestions();
+        return;
+      case 'check-activity':
+        showSuggestions(true);
         return;
       case 'log-done':
         setEndDay({ step: 'suggest' });

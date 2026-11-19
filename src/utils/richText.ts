@@ -14,7 +14,8 @@ export type Block =
   | { kind: 'blank' }
   | { kind: 'heading'; level: 1 | 2 | 3; inline: Inline[] }
   | { kind: 'bullet'; marker: string; inline: Inline[] }
-  | { kind: 'line'; inline: Inline[] };
+  | { kind: 'line'; inline: Inline[] }
+  | { kind: 'group'; label: string; items: Inline[][] };
 
 // One alternative per mark. Groups: 1 code, 2 **bold**, 3 *bold*, 4 label, 5 url, 6 _italic_.
 const INLINE = /`([^`\n]+)`|\*\*([^*\n]+)\*\*|\*([^*\s][^*\n]*?)\*|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(?<![\p{L}\p{N}_])_([^_\s][^_\n]*?)_(?![\p{L}\p{N}_])/gu;
@@ -55,4 +56,50 @@ export function parseBlocks(text: string): Block[] {
     if (b) return { kind: 'bullet', marker: b[1] === '-' ? '•' : b[1], inline: parseInline(b[2]) };
     return { kind: 'line', inline: parseInline(line) };
   });
+}
+
+/** The project of a bullet that starts with a bold tag ("*hims:* Fixed …"), and the rest of its text; null for any other block. */
+function projectTag(b: Block): { label: string; rest: Inline[] } | null {
+  if (b.kind !== 'bullet') return null;
+  const [first, ...rest] = b.inline;
+  if (first?.kind !== 'bold' || !first.text.endsWith(':')) return null;
+  const label = first.text.slice(0, -1).trim();
+  if (!label) return null;
+  if (rest[0]?.kind === 'text') rest[0] = { kind: 'text', text: rest[0].text.replace(/^\s+/, '') };
+  return { label, rest: rest.filter((p) => p.kind !== 'text' || p.text !== '') };
+}
+
+/**
+ * For display only: inside each section (between headings), bullets tagged with a project are gathered into one group per
+ * project, in the order each project first appears, placed where the first tagged bullet was. Other lines stay where they are.
+ */
+export function groupByProject(blocks: Block[]): Block[] {
+  const out: Block[] = [];
+  let groups: Map<string, Inline[][]> | null = null;
+  let at = -1;
+  const close = () => {
+    if (groups) out.splice(at, 0, ...[...groups].map(([label, items]): Block => ({ kind: 'group', label, items })));
+    groups = null;
+  };
+  for (const b of blocks) {
+    if (b.kind === 'heading') {
+      close();
+      out.push(b);
+      continue;
+    }
+    const tag = projectTag(b);
+    if (!tag) {
+      // A blank line between tagged bullets would leave gaps inside the gathered list.
+      if (!(groups && b.kind === 'blank')) out.push(b);
+      continue;
+    }
+    if (!groups) {
+      groups = new Map();
+      at = out.length;
+    }
+    const key = [...groups.keys()].find((k) => k.toLowerCase() === tag.label.toLowerCase()) ?? tag.label;
+    groups.set(key, [...(groups.get(key) ?? []), tag.rest]);
+  }
+  close();
+  return out;
 }

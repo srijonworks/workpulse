@@ -154,11 +154,43 @@ describe('script v6: standup emails', () => {
     expect(h.mails[0].body).toContain('Yesterday: pump fixed.');
     expect(h.mails[0].body).toContain('https://docs.google.com/spreadsheets/d/FAKE_ID/edit');
     expect(h.mails[0].htmlBody).toContain('Open your WorkPulse Sheet');
+    // the designed day email (as the evening one), for that date, with the standup as a section
+    expect(h.mails[0].htmlBody).toContain('Wednesday 11 November');
+    expect(h.mails[0].htmlBody).toContain('Standup');
+    expect(h.mails[0].htmlBody).toContain('when your day closed');
     expect(h.call('sendDayEmail', { token, ...DAY, requestId: 'r2' })).toMatchObject({ state: 'sent', duplicate: true });
     expect(h.mails).toHaveLength(1);
     expect(h.call('sendDayEmail', { token, kind: 'week', from: '2026-11-09', to: '2026-11-15' }).state).toBe('sent');
     expect(h.mails).toHaveLength(2);
     expect(h.mails[1].subject).toContain('week');
+  });
+
+  it('draws the standup marks as HTML and groups bullets by project', () => {
+    const { h, token } = ready();
+    const text = '*What I completed today:*\n- *hims:* Fixed <stock>\n- *idim:* Report\n- *HIMS:* Billing cap\n\n*Blockers:*\nNone';
+    h.call('saveHistory', { token, standups: [standup({ text, editedAt: 'z' })] });
+    expect(h.call('sendDayEmail', { token, ...DAY }).state).toBe('sent');
+    const html = h.mails[0].htmlBody as string;
+    expect(html).not.toContain('*hims:*');
+    expect(html).not.toContain('<stock>');
+    expect(html).toContain('Fixed &lt;stock&gt;');
+    expect(html).toMatch(/What I completed today:<\/div>/);
+    // one hims group holding both of its bullets, before idim
+    expect(html.match(/>hims<\/div>/g)).toHaveLength(1);
+    expect(html.indexOf('>hims</div>')).toBeLessThan(html.indexOf('>idim</div>'));
+    expect(html.indexOf('Billing cap')).toBeLessThan(html.indexOf('>idim</div>'));
+    const body = h.mails[0].body as string;
+    expect(body).toContain('STANDUP\nWHAT I COMPLETED TODAY:\nhims\n  - Fixed ‹stock›\n  - Billing cap\nidim\n  - Report');
+  });
+
+  it('the evening email has no standup section', () => {
+    const { h } = ready();
+    const mail = h.run('buildEveningEmail', {
+      date: '2026-11-11', tz: 'Asia/Dhaka', now: '2026-11-11T12:00:00.000Z', tasks: [], logs: [],
+      workday: { clockIn: '2026-11-11T03:00:00.000Z' }, workdayHours: 8, pushedAt: '', pendingPhoneCount: 0,
+    }) as { html: string; skip: boolean };
+    expect(mail.skip).toBe(false);
+    expect(mail.html).not.toContain('>Standup<');
   });
 
   it('sends nothing when the standup text is empty or missing', () => {

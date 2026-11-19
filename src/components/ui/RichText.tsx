@@ -1,5 +1,5 @@
 import React from 'react';
-import { parseBlocks, type Inline } from '../../utils/richText';
+import { groupByProject, parseBlocks, type Inline } from '../../utils/richText';
 
 // Shows standups and AI summaries with their *bold*, _italic_, `code`, links, bullets and headings drawn properly. Elements only,
 // never HTML strings. Use for read-only text; editable text stays in a textarea.
@@ -28,10 +28,26 @@ const inline = (parts: Inline[]): React.ReactNode[] =>
     }
   });
 
-export const RichText: React.FC<{ text: string; className?: string }> = ({ text, className }) => (
+// `groupProjects`: bullets tagged "*project:*" are shown under one heading per project (display only; the text is unchanged).
+export const RichText: React.FC<{ text: string; className?: string; groupProjects?: boolean }> = ({ text, className, groupProjects }) => (
   <div className={`flex flex-col gap-1.5 leading-relaxed ${className ?? ''}`}>
-    {parseBlocks(text).map((b, i) => {
+    {(groupProjects ? groupByProject(parseBlocks(text)) : parseBlocks(text)).map((b, i) => {
       if (b.kind === 'blank') return <div key={i} aria-hidden="true" className="h-1" />;
+      if (b.kind === 'group') {
+        return (
+          <section key={i} aria-label={b.label} className="mt-1.5 first:mt-0">
+            <div className="font-bold text-[var(--text-main)]">{b.label}</div>
+            <ul className="mt-1 flex flex-col gap-1.5">
+              {b.items.map((item, j) => (
+                <li key={j} className="flex gap-2">
+                  <span aria-hidden="true" className="shrink-0 text-[var(--text-muted)]">•</span>
+                  <span className="min-w-0">{inline(item)}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      }
       if (b.kind === 'heading') {
         return (
           <div key={i} className="mt-1 border-b border-[var(--border-app)] pb-1 font-bold text-[var(--text-main)] first:mt-0">

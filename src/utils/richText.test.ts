@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseBlocks, parseInline } from './richText';
+import { groupByProject, parseBlocks, parseInline } from './richText';
 
 describe('parseInline', () => {
   it('reads chat-style and markdown bold, italic, code and links', () => {
@@ -46,6 +46,18 @@ describe('parseBlocks', () => {
     expect(parseBlocks('*Blockers*')[0].kind).toBe('heading');
     expect(parseBlocks('*Blockers* none')[0].kind).toBe('line');
     expect(parseBlocks('* spaced')[0].kind).toBe('line');
+  });
+
+  it('groups project-tagged bullets per section, in first-seen order, ignoring case', () => {
+    const b = groupByProject(parseBlocks('*Done:*\n• *wp:* a\n• *hims:* b\n\n• *WP:* c\nNote\n*Next:*\n• *hims:* d\n• plain'));
+    expect(b.map((x) => x.kind)).toEqual(['heading', 'group', 'group', 'line', 'heading', 'group', 'bullet']);
+    expect(b[1]).toEqual({ kind: 'group', label: 'wp', items: [[{ kind: 'text', text: 'a' }], [{ kind: 'text', text: 'c' }]] });
+    expect(b[2]).toMatchObject({ label: 'hims', items: [[{ kind: 'text', text: 'b' }]] });
+  });
+
+  it('leaves text without project tags as it was', () => {
+    const blocks = parseBlocks('*Done:*\n• one\n\nNone');
+    expect(groupByProject(blocks)).toEqual(blocks);
   });
 
   it('handles Windows line endings', () => {

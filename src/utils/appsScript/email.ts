@@ -10,6 +10,8 @@
 // Version 6 adds the standup emails (sendDayEmail, emailStatus, cancelDayEmail: token-checked doPost actions, no new
 // public function). A one-off time trigger for a delayed standup email runs sendEveningEmail too (a trigger needs a
 // public handler), which first sends the standup emails that are due and removes their triggers.
+// Version 7: a day's standup email is the designed evening email for that date with the standup as its first section
+// (standupHtml_: marks drawn, bullets grouped per project); a week's is the standup alone in the same card.
 export const SCRIPT_EMAIL = String.raw`
 // =========================================================================
 // Evening email
@@ -206,11 +208,13 @@ function sendMail_(mail) {
   return to;
 }
 
-// Reads the Sheet and builds the email for the date of now in the user's zone.
-function composeEmail_(isTest, now, meta) {
+// Reads the Sheet and builds the email for the date of now in the user's zone. extra (optional): { date: 'yyyy-MM-dd' for
+// another day, standup: its standup text, when: 'clockout' for the email sent when the day closes, sheetUrl }.
+function composeEmail_(isTest, now, meta, extra) {
+  extra = extra || {};
   var tz = userTz_(meta);
   var ssTz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
-  var today = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+  var today = isDateText_(extra.date) ? extra.date : Utilities.formatDate(now, tz, 'yyyy-MM-dd');
   var i;
 
   var tasks = [];
@@ -252,7 +256,10 @@ function composeEmail_(isTest, now, meta) {
     workdayHours: meta.workdayHours || DEFAULT_WORKDAY_HOURS,
     pushedAt: meta.pushedAt || '',
     pendingPhoneCount: pendingItems_().length,
-    isTest: isTest === true
+    isTest: isTest === true,
+    standup: extra.standup || '',
+    when: extra.when || '',
+    sheetUrl: extra.sheetUrl || ''
   });
 }
 
@@ -353,12 +360,18 @@ function dayEmailMail_(target, text) {
   try {
     sheetUrl = SpreadsheetApp.getActiveSpreadsheet().getUrl();
   } catch (err) {}
-  var subject = target.kind === 'day'
-    ? 'WorkPulse standup \u00b7 ' + dayText_(target.from, 'EEE d MMM')
-    : 'WorkPulse week standup \u00b7 ' + dayText_(target.from, 'd MMM') + ' to ' + dayText_(target.to, 'd MMM');
-  var html = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#1d2b24;white-space:pre-wrap">' + esc_(text) + '</div>' +
-    (sheetUrl ? '<p style="font-family:Arial,Helvetica,sans-serif;font-size:13px"><a href="' + esc_(sheetUrl) + '">Open your WorkPulse Sheet</a></p>' : '');
-  return { subject: subject, html: html, text: text + (sheetUrl ? '\n\nYour WorkPulse Sheet: ' + sheetUrl : '') };
+  // A day: the same designed email as the evening one, for that date, with the standup as its first section.
+  if (target.kind === 'day') {
+    return composeEmail_(false, new Date(), getMeta_(), { date: target.from, standup: text, when: 'clockout', sheetUrl: sheetUrl });
+  }
+  var subject = 'WorkPulse week standup \u00b7 ' + dayText_(target.from, 'd MMM') + ' to ' + dayText_(target.to, 'd MMM');
+  var footer = 'Sent by your WorkPulse script.';
+  var html = emailShell_(
+    '<tr><td style="background:#0f3d2e;color:#f4f1e8;padding:18px 24px"><div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#afbbb0;font-weight:bold">Week standup</div>' +
+      '<div style="font-size:26px;font-weight:bold;color:#f2b705;margin-top:6px;line-height:1.1">' + esc_(dayText_(target.from, 'd MMM') + ' to ' + dayText_(target.to, 'd MMM')) + '</div></td></tr>' +
+      '<tr><td style="padding:16px 24px 4px"><div style="border-top:2px solid #1d2b24;padding-top:8px">' + standupHtml_(text) + '</div></td></tr>' +
+      footerRow_(footer, sheetUrl));
+  return { subject: subject, html: html, text: standupPlain_(text) + (sheetUrl ? '\n\nYour WorkPulse Sheet: ' + sheetUrl : '') };
 }
 
 // One send try for an entry. The try is counted and saved before the mail goes, so a crash cannot hide a try.
@@ -602,15 +615,19 @@ function buildEveningEmail(data) {
     ? 'WorkPulse \u00b7 ' + dayShort + ' \u00b7 no data yet'
     : 'WorkPulse \u00b7 ' + dayShort + ' \u00b7 ' + fmtHM_(worked) + ' worked \u00b7 ' + logs.length + (logs.length === 1 ? ' log' : ' logs');
 
-  var footer = (data.isTest ? 'This is a test email. ' : '') + 'Sent by your WorkPulse script' + (now ? ' at ' + clockTime_(now, tz) : '') + ' (' + tz +
-    '). Change the time or turn it off in WorkPulse Settings \u2192 Phone & evening email.';
+  var footer = data.when === 'clockout'
+    ? 'Sent by your WorkPulse script when your day closed' + (now ? ', at ' + clockTime_(now, tz) : '') + ' (' + tz +
+      '). Change when it arrives, or turn it off, in WorkPulse Settings \u2192 Phone & evening email.'
+    : (data.isTest ? 'This is a test email. ' : '') + 'Sent by your WorkPulse script' + (now ? ' at ' + clockTime_(now, tz) : '') + ' (' + tz +
+      '). Change the time or turn it off in WorkPulse Settings \u2192 Phone & evening email.';
+  var standup = String(data.standup || '').replace(/^\s+|\s+$/g, '');
 
   var model = {
     dayLong: dayLong, noData: noData, worked: worked, target: target, clockLine: clockLine, dataLine: dataLine,
     groups: groups, logCount: logs.length, logMinutes: logMinutes, done: done, openGroups: openGroups,
-    openCount: open.length, pendingLine: pendingLine, footer: footer
+    openCount: open.length, pendingLine: pendingLine, footer: footer, standup: standup, sheetUrl: String(data.sheetUrl || '')
   };
-  return { skip: noData, subject: subject, html: emailHtml_(model), text: emailText_(model) };
+  return { skip: noData && standup === '', subject: subject, html: emailHtml_(model), text: emailText_(model) };
 }
 
 // ---- Pieces ----
@@ -758,12 +775,134 @@ function stageNote_(task) {
 
 var EM_LABEL = 'font-size:13px;font-weight:bold;letter-spacing:.1em;text-transform:uppercase';
 
+// The page, the card and its rows: rows is the HTML of the card's table rows.
+function emailShell_(rows) {
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>WorkPulse</title></head>' +
+    '<body style="margin:0;background:#e7e3d6;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#1d2b24">' +
+    '<table role="presentation" width="620" align="center" cellpadding="0" cellspacing="0" style="max-width:620px;margin:0 auto;background:#fbfaf5;border:1px solid #dcd8cb">' +
+    rows + '</table></body></html>';
+}
+
+function footerRow_(footer, sheetUrl) {
+  return '<tr><td style="padding:22px 24px 20px;font-size:12px;color:#5d6b63;border-top:1px solid #dcd8cb">' + esc_(footer) +
+    (sheetUrl ? ' <a href="' + esc_(sheetUrl) + '" style="color:#0f3d2e">Open your WorkPulse Sheet</a>' : '') + '</td></tr>';
+}
+
+// ---- Standup text (chat-style marks: *bold*, **bold**, _italic_, "- " or "• " bullets, bold-only lines as headings) ----
+
+// One line of standup text as HTML: escaped first, then the marks become tags.
+function standupInline_(s) {
+  return esc_(s)
+    .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
+    .replace(/\*([^*\s][^*\n]*?)\*/g, '<b>$1</b>')
+    .replace(/(^|[^A-Za-z0-9_])_([^_\s][^_\n]*?)_(?![A-Za-z0-9_])/g, '$1<i>$2</i>');
+}
+
+// The lines as blocks: { k: 'h', text } heading, { k: 'g', label, items } one project's bullets, { k: 'b', text } bullet,
+// { k: 'l', text } line, { k: 'gap' }. Inside a section, bullets that start with "*project:*" are gathered into one group per
+// project, in the order each first appears, where the first of them was.
+function standupBlocks_(text) {
+  var lines = String(text).replace(/\r\n?/g, '\n').split('\n');
+  var out = [];
+  var groups = null;
+  var at = 0;
+  function close() {
+    if (!groups) return;
+    var made = [];
+    for (var g = 0; g < groups.order.length; g++) made.push(groups.map['k' + groups.order[g]]);
+    out.splice.apply(out, [at, 0].concat(made));
+    groups = null;
+  }
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    if (/^\s*$/.test(line)) {
+      if (!groups) out.push({ k: 'gap' });
+      continue;
+    }
+    var hm = /^#{1,3}\s+(.+)$/.exec(line);
+    // A line that is only a bold phrase, maybe after an emoji or symbol, is a heading; the symbol is dropped.
+    var bold = /^\*{1,2}([^*\n]+?)\*{1,2}\s*$/.exec(line.replace(/^[\s -⯿\ud800-\udfff️‍]+/, ''));
+    var bm = /^\s*([-•]|\d{1,2}[.)])\s+(.+)$/.exec(line);
+    if (hm || (bold && !bm)) {
+      close();
+      out.push({ k: 'h', text: hm ? hm[1] : bold[1] });
+      continue;
+    }
+    if (bm) {
+      var tag = /^\*{1,2}([^*\n]+?):\*{1,2}\s*(.*)$/.exec(bm[2]);
+      if (tag && tag[1].replace(/\s+/g, '') !== '') {
+        if (!groups) {
+          groups = { order: [], map: {} };
+          at = out.length;
+        }
+        var key = tag[1].replace(/^\s+|\s+$/g, '').toLowerCase();
+        if (!groups.map.hasOwnProperty('k' + key)) {
+          groups.order.push(key);
+          groups.map['k' + key] = { k: 'g', label: tag[1].replace(/^\s+|\s+$/g, ''), items: [] };
+        }
+        groups.map['k' + key].items.push(tag[2]);
+        continue;
+      }
+      out.push({ k: 'b', text: bm[2] });
+      continue;
+    }
+    out.push({ k: 'l', text: line });
+  }
+  close();
+  return out;
+}
+
+function bulletRow_(inlineHtml) {
+  return '<tr><td valign="top" style="width:16px;padding:2px 0;font-size:14px;color:#5d6b63">&bull;</td>' +
+    '<td style="padding:2px 0;font-size:14px;line-height:1.5">' + inlineHtml + '</td></tr>';
+}
+
+function standupHtml_(text) {
+  var blocks = standupBlocks_(text);
+  var h = [];
+  for (var i = 0; i < blocks.length; i++) {
+    var b = blocks[i];
+    var first = h.length === 0;
+    if (b.k === 'gap') {
+      if (!first) h.push('<div style="height:6px"></div>');
+    } else if (b.k === 'h') {
+      h.push('<div style="font-size:15px;font-weight:bold;margin:' + (first ? '0' : '12px') + ' 0 4px">' + standupInline_(b.text) + '</div>');
+    } else if (b.k === 'g') {
+      h.push('<div style="font-size:14px;font-weight:bold;color:#0f3d2e;margin:' + (first ? '0' : '8px') + ' 0 2px 4px">' + esc_(b.label) + '</div>');
+      var rows = [];
+      for (var j = 0; j < b.items.length; j++) rows.push(bulletRow_(standupInline_(b.items[j])));
+      h.push('<table role="presentation" cellpadding="0" cellspacing="0" style="margin-left:14px">' + rows.join('') + '</table>');
+    } else if (b.k === 'b') {
+      h.push('<table role="presentation" cellpadding="0" cellspacing="0" style="margin-left:4px">' + bulletRow_(standupInline_(b.text)) + '</table>');
+    } else {
+      h.push('<div style="font-size:14px;line-height:1.5">' + standupInline_(b.text) + '</div>');
+    }
+  }
+  return h.join('');
+}
+
+// The standup for the plain-text body: the same grouping, with the marks taken out.
+function standupPlain_(text) {
+  function bare(s) {
+    return plain_(String(s).replace(/\*\*?([^*\n]+?)\*\*?/g, '$1'));
+  }
+  var blocks = standupBlocks_(text);
+  var t = [];
+  for (var i = 0; i < blocks.length; i++) {
+    var b = blocks[i];
+    if (b.k === 'gap') t.push('');
+    else if (b.k === 'h') t.push(bare(b.text).toUpperCase());
+    else if (b.k === 'g') {
+      t.push(plain_(b.label));
+      for (var j = 0; j < b.items.length; j++) t.push('  - ' + bare(b.items[j]));
+    } else if (b.k === 'b') t.push('  - ' + bare(b.text));
+    else t.push(bare(b.text));
+  }
+  return t.join('\n');
+}
+
 function emailHtml_(m) {
   var h = [];
-  h.push('<!doctype html><html lang="en"><head><meta charset="utf-8"><title>WorkPulse</title></head>');
-  h.push('<body style="margin:0;background:#e7e3d6;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#1d2b24">');
-  h.push('<table role="presentation" width="620" align="center" cellpadding="0" cellspacing="0" style="max-width:620px;margin:0 auto;background:#fbfaf5;border:1px solid #dcd8cb">');
-
   h.push('<tr><td style="background:#0f3d2e;color:#f4f1e8;padding:18px 24px">');
   h.push('<div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#afbbb0;font-weight:bold">' + esc_(m.dayLong) + '</div>');
   if (m.noData) {
@@ -778,7 +917,12 @@ function emailHtml_(m) {
 
   h.push('<tr><td style="padding:6px 24px 0"><div style="font-size:12px;color:#5d6b63;padding:10px 0;border-bottom:1px solid #dcd8cb">' + esc_(m.dataLine) + '</div></td></tr>');
 
-  h.push('<tr><td style="padding:16px 24px 4px"><div style="' + EM_LABEL + '">Logs &middot; ' + m.logCount + ' &middot; ' + esc_(fmtHM_(m.logMinutes)) + '</div></td></tr>');
+  if (m.standup) {
+    h.push('<tr><td style="padding:16px 24px 4px"><div style="' + EM_LABEL + '">Standup</div></td></tr>');
+    h.push('<tr><td style="padding:0 24px"><div style="border-top:2px solid #1d2b24;padding-top:10px;color:#1d2b24">' + standupHtml_(m.standup) + '</div></td></tr>');
+  }
+
+  h.push('<tr><td style="padding:' + (m.standup ? '24px' : '16px') + ' 24px 4px"><div style="' + EM_LABEL + '">Logs &middot; ' + m.logCount + ' &middot; ' + esc_(fmtHM_(m.logMinutes)) + '</div></td></tr>');
   h.push('<tr><td style="padding:0 24px">');
   if (m.groups.length === 0) {
     h.push('<div style="border-top:2px solid #1d2b24;padding-top:8px;font-size:14px;color:#5d6b63">No logs yet today.</div>');
@@ -830,9 +974,8 @@ function emailHtml_(m) {
   }
   h.push('</td></tr>');
 
-  h.push('<tr><td style="padding:22px 24px 20px;font-size:12px;color:#5d6b63;border-top:1px solid #dcd8cb">' + esc_(m.footer) + '</td></tr>');
-  h.push('</table></body></html>');
-  return h.join('');
+  h.push(footerRow_(m.footer, m.sheetUrl));
+  return emailShell_(h.join(''));
 }
 
 // ---- Plain text ----
@@ -848,6 +991,11 @@ function emailText_(m) {
   }
   t.push(m.dataLine);
   t.push('');
+  if (m.standup) {
+    t.push('STANDUP');
+    t.push(standupPlain_(m.standup));
+    t.push('');
+  }
   t.push('LOGS \u00b7 ' + m.logCount + ' \u00b7 ' + fmtHM_(m.logMinutes));
   if (m.groups.length === 0) t.push('No logs yet today.');
   for (var g = 0; g < m.groups.length; g++) {
@@ -876,6 +1024,7 @@ function emailText_(m) {
   if (m.pendingLine) t.push(m.pendingLine);
   t.push('');
   t.push(m.footer);
+  if (m.sheetUrl) t.push('Your WorkPulse Sheet: ' + m.sheetUrl);
   return t.join('\n');
 }
 `;

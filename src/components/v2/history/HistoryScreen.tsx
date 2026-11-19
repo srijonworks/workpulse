@@ -500,7 +500,7 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
                         {rewriteNote.text}
                       </p>
                     )}
-                    <RichText text={standup} className="v2-panel v2-row v2-inset text-[length:var(--fs-body)]" />
+                    <RichText text={standup} groupProjects className="v2-panel v2-row v2-inset text-[length:var(--fs-body)]" />
                   </div>
                 )}
               </section>
