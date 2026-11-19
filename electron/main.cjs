@@ -486,6 +486,8 @@ ipcMain.on('wp:state', (event, snapshot) => {
 ipcMain.on('wp:command', (event, cmd) => {
   if (!fromOurPage(event) || typeof cmd !== 'object' || cmd === null) return;
   if (cmd.type === 'open') return showWindow();
+  // These open a dialog in the main window, so it must be on screen.
+  if (cmd.type === 'edit' || cmd.type === 'adjust') showWindow();
   if (win && !win.isDestroyed()) win.webContents.send('wp:command', cmd);
 });
 

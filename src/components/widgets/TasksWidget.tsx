@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ExternalLink, Pause, Play, X } from 'lucide-react';
+import { Check, ExternalLink, MoreHorizontal, Pause, Play, X } from 'lucide-react';
 import { desktopBridge } from '../../utils/desktopBridge';
 import { formatHms } from '../../utils/workday';
 import { isSnapshotStale, type WidgetCommand, type WidgetSnapshot, type WidgetTask } from '../../utils/widgets';
@@ -19,6 +19,70 @@ const NOTE = 'text-[length:var(--fs-small)] text-[var(--text-muted)]';
 
 const STATE_NOTE: Record<WidgetTask['state'], string> = { running: '', paused: 'Paused', blocked: 'Blocked', planned: '' };
 
+const STRIP_BTN =
+  'wg-btn inline-flex h-7 cursor-pointer items-center rounded-[var(--radius-btn)] px-2 text-[length:var(--fs-small)] font-semibold text-[var(--text-main)] hover:bg-[var(--bg-subtle)]';
+
+// The ⋯ button of a row: it opens a strip of actions inside the row (a drop-down menu would be cut off by the small window).
+const MoreButton: React.FC<{ title: string; open: boolean; onToggle(): void }> = ({ title, open, onToggle }) => (
+  <button
+    type="button"
+    aria-label={`More actions for ${title}`}
+    aria-expanded={open}
+    title="More actions"
+    onClick={onToggle}
+    className={`${ICON_BTN} ${open ? 'text-[var(--text-main)]' : ''}`}
+  >
+    <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+  </button>
+);
+
+// Done (unless shown on the row already), Edit, Adjust time, Back to planned and Delete, which asks once before it deletes.
+const ActionStrip: React.FC<{ task: WidgetTask; withDone: boolean; onDone(): void }> = ({ task, withDone, onDone }) => {
+  const [confirm, setConfirm] = useState(false);
+  const act = (c: WidgetCommand) => {
+    send(c);
+    onDone();
+  };
+  if (confirm) {
+    return (
+      <div role="group" aria-label={`Delete ${task.title}?`} className="mt-1.5 flex flex-wrap items-center gap-1 pl-2.5">
+        <span className={`${NOTE} mr-1`}>Delete this task?</span>
+        <button type="button" onClick={() => act({ type: 'delete', id: task.id })} className={`${STRIP_BTN} text-danger`}>
+          Delete
+        </button>
+        <button type="button" onClick={() => setConfirm(false)} className={STRIP_BTN}>
+          Keep
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div role="group" aria-label={`Actions for ${task.title}`} className="mt-1.5 flex flex-wrap items-center gap-1 pl-2.5">
+      {withDone && (
+        <button type="button" onClick={() => act({ type: 'done', id: task.id })} className={STRIP_BTN}>
+          Done
+        </button>
+      )}
+      <button type="button" onClick={() => act({ type: 'edit', id: task.id })} className={STRIP_BTN}>
+        Edit
+      </button>
+      {task.state !== 'planned' && (
+        <button type="button" onClick={() => act({ type: 'adjust', id: task.id })} className={STRIP_BTN}>
+          Adjust time
+        </button>
+      )}
+      {(task.state === 'paused' || task.state === 'blocked') && (
+        <button type="button" onClick={() => act({ type: 'replan', id: task.id })} className={STRIP_BTN}>
+          Back to planned
+        </button>
+      )}
+      <button type="button" onClick={() => setConfirm(true)} className={`${STRIP_BTN} text-danger`}>
+        Delete
+      </button>
+    </div>
+  );
+};
+
 // The running task with its clock, then the open tasks. Start / Pause / Resume do what the task rows do.
 export const TasksWidget: React.FC<{ snap: WidgetSnapshot | null }> = ({ snap }) => {
   const now = useNow(1000);
@@ -26,6 +90,8 @@ export const TasksWidget: React.FC<{ snap: WidgetSnapshot | null }> = ({ snap })
   const open = snap?.tasks.filter((t) => t.state !== 'running') ?? [];
   const stale = !!snap && isSnapshotStale(snap, now);
   const [text, setText] = useState('');
+  const [moreId, setMoreId] = useState<string | null>(null);
+  const toggle = (id: string) => setMoreId((m) => (m === id ? null : id));
   const add = (e: React.FormEvent) => {
     e.preventDefault();
     if (!text.trim() || !snap) return;
@@ -66,20 +132,26 @@ export const TasksWidget: React.FC<{ snap: WidgetSnapshot | null }> = ({ snap })
       </form>
 
       {running.map((t) => (
-        <div key={t.id} className="wg flex items-center gap-3 border-b border-[var(--border-app)] bg-[var(--bg-subtle)] px-3 py-2.5">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <Dot color={t.color} />
-              <span className="truncate text-[length:var(--fs-body)] font-semibold">{t.title}</span>
-            </div>
-            <div className="num mt-0.5 text-[22px] font-bold leading-none">
+        <div key={t.id} className="wg border-b border-[var(--border-app)] bg-[var(--bg-subtle)] px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <Dot color={t.color} />
+            <span className="min-w-0 flex-1 truncate text-[length:var(--fs-body)] font-semibold">{t.title}</span>
+            <MoreButton title={t.title} open={moreId === t.id} onToggle={() => toggle(t.id)} />
+          </div>
+          <div className="mt-1 flex items-center gap-2">
+            <div className="num min-w-0 flex-1 text-[22px] font-bold leading-none">
               {formatHms(t.seconds + (snap ? (now - snap.at) / 1000 : 0))}
             </div>
+            <button type="button" onClick={() => send({ type: 'pause', id: t.id })} className={BTN}>
+              <Pause className="h-3.5 w-3.5" aria-hidden="true" />
+              Pause
+            </button>
+            <button type="button" onClick={() => send({ type: 'done', id: t.id })} className={BTN}>
+              <Check className="h-3.5 w-3.5" aria-hidden="true" />
+              Done
+            </button>
           </div>
-          <button type="button" onClick={() => send({ type: 'pause', id: t.id })} className={BTN}>
-            <Pause className="h-3.5 w-3.5" aria-hidden="true" />
-            Pause
-          </button>
+          {moreId === t.id && <ActionStrip task={t} withDone={false} onDone={() => setMoreId(null)} />}
         </div>
       ))}
 
@@ -88,20 +160,24 @@ export const TasksWidget: React.FC<{ snap: WidgetSnapshot | null }> = ({ snap })
         {snap && snap.tasks.length === 0 && <li className={`px-3 py-3 ${NOTE}`}>No open tasks.</li>}
         {snap && running.length === 0 && open.length > 0 && <li className={`px-3 pt-2 ${NOTE}`}>Nothing running.</li>}
         {open.map((t) => (
-          <li key={t.id} className="flex items-center gap-2 border-b border-[var(--border-app)] px-3 py-2 last:border-b-0">
-            <Dot color={t.color} />
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[length:var(--fs-body)]">{t.title}</div>
-              {(STATE_NOTE[t.state] || t.project) && (
-                <div className={`truncate ${NOTE}`}>{[STATE_NOTE[t.state], t.project].filter(Boolean).join(' · ')}</div>
+          <li key={t.id} className="border-b border-[var(--border-app)] px-3 py-2 last:border-b-0">
+            <div className="flex items-center gap-2">
+              <Dot color={t.color} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[length:var(--fs-body)]">{t.title}</div>
+                {(STATE_NOTE[t.state] || t.project) && (
+                  <div className={`truncate ${NOTE}`}>{[STATE_NOTE[t.state], t.project].filter(Boolean).join(' · ')}</div>
+                )}
+              </div>
+              {t.state === 'blocked' ? null : (
+                <button type="button" onClick={() => send({ type: t.state === 'paused' ? 'resume' : 'start', id: t.id })} className={BTN}>
+                  <Play className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t.state === 'paused' ? 'Resume' : 'Start'}
+                </button>
               )}
+              <MoreButton title={t.title} open={moreId === t.id} onToggle={() => toggle(t.id)} />
             </div>
-            {t.state === 'blocked' ? null : (
-              <button type="button" onClick={() => send({ type: t.state === 'paused' ? 'resume' : 'start', id: t.id })} className={BTN}>
-                <Play className="h-3.5 w-3.5" aria-hidden="true" />
-                {t.state === 'paused' ? 'Resume' : 'Start'}
-              </button>
-            )}
+            {moreId === t.id && <ActionStrip task={t} withDone onDone={() => setMoreId(null)} />}
           </li>
         ))}
       </ul>

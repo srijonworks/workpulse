@@ -1498,7 +1498,15 @@ export default function App() {
     onCommand: (c) => {
       if (c.type === 'start' || c.type === 'resume') handleUpdateTaskStage(c.id, 'in_progress');
       else if (c.type === 'pause') handlePauseTask(c.id);
-      else if (c.type === 'close') {
+      else if (c.type === 'done' || c.type === 'edit' || c.type === 'adjust' || c.type === 'replan' || c.type === 'delete') {
+        const task = backlogRef.current.find((t) => t.id === c.id);
+        if (!task) return;
+        if (c.type === 'done') handleCompleteTask(task);
+        else if (c.type === 'edit') setEditingTask(task);
+        else if (c.type === 'adjust') setAdjustingTask(task);
+        else if (c.type === 'replan') handleUpdateTaskStage(c.id, 'planned');
+        else handleDeleteBacklogTask(c.id);
+      } else if (c.type === 'close') {
         const w = settingsRef.current.widgets;
         updateSettings({ widgets: { ...w, [c.kind]: { ...w?.[c.kind], on: false } } });
       } else if (c.type === 'set-widget') {

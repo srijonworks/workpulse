@@ -54,6 +54,8 @@ export interface WidgetSnapshot {
 
 export type WidgetCommand =
   | { type: 'start' | 'pause' | 'resume'; id: string }
+  // The ⋯ actions of a task row. edit and adjust open their dialog in the main window (the shell shows it first).
+  | { type: 'done' | 'edit' | 'adjust' | 'replan' | 'delete'; id: string }
   | { type: 'clock-in' }
   | { type: 'end-day' }
   | { type: 'add-task'; text: string }
