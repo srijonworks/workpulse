@@ -63,6 +63,10 @@
      same x and nothing shifts sideways when a section grows past the window (Settings sections). */
   html { scrollbar-gutter: stable; }
 
+  /* The reserved strip takes the page colour, so on a short screen (nothing to scroll) it reads as page,
+     not as a grey bar. The thumb still shows when the page scrolls. */
+  html { scrollbar-color: color-mix(in srgb, var(--text-muted) 50%, var(--bg-app)) var(--bg-app); }
+
   body {
     font-family: var(--font-body);
     -webkit-font-smoothing: antialiased;
