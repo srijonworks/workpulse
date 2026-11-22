@@ -1910,7 +1910,7 @@ export default function App() {
             activityProps={activityProps}
             onSuggestionsPending={noop}
             onActivityScanned={noop}
-            onEndDay={h.endDay}
+            onEndDay={todayRecord?.clockOut ? undefined : h.endDay}
             onStandup={h.standupToday}
             onOpenImage={h.openImage}
             sync={sync}

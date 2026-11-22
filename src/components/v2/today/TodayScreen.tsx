@@ -41,7 +41,7 @@ export interface TodayScreenProps {
   activityProps: TodayActivityProps;
   onSuggestionsPending(n: number): void;
   onActivityScanned(): void;
-  onEndDay(): void;
+  onEndDay?(): void;
   onStandup(): void;
   onOpenImage(base64: string): void;
   /** The Sync button's state (App memoizes it, so the memo below holds). */

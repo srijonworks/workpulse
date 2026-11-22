@@ -16,7 +16,8 @@ export interface TodayLogProps {
   onEditLog(log: WorkLog): void;
   onDeleteLog(id: string): void;
   onDuplicateLog(log: WorkLog): void;
-  onEndDay(): void;
+  /** Absent once today is clocked out: there is no day left to end (the band offers Resume). */
+  onEndDay?(): void;
   /** Opens the Standup dialog with today's logs selected. */
   onStandup(): void;
   onOpenImage(base64: string): void;
@@ -80,13 +81,15 @@ export const TodayLog: React.FC<TodayLogProps> = ({ logs, projects, today, onAdd
             <span className="sr-only"> logged</span>
           </span>
         </h2>
-        <button
-          type="button"
-          onClick={onEndDay}
-          className="v2-btn v2-btn-strong w-full sm:w-auto min-h-9 pointer-coarse:min-h-11 px-4 normal-case tracking-normal cursor-pointer transition-colors"
-        >
-          End my day
-        </button>
+        {onEndDay && (
+          <button
+            type="button"
+            onClick={onEndDay}
+            className="v2-btn v2-btn-strong w-full sm:w-auto min-h-9 pointer-coarse:min-h-11 px-4 normal-case tracking-normal cursor-pointer transition-colors"
+          >
+            End my day
+          </button>
+        )}
       </div>
       <div className="v2-panel">
         <div className="v2-row v2-inset">
