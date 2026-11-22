@@ -259,7 +259,7 @@ function composeEmail_(isTest, now, meta, extra) {
     var t = taskRows[i];
     if (t[0] === '') continue;
     tasks.push({
-      id: String(t[0]), title: String(t[1]), project: String(t[2]), dueDate: dateText_(t[4], ssTz),
+      id: String(t[0]), title: String(t[1]), project: String(t[2]), projectId: String(t[3] || ''), dueDate: dateText_(t[4], ssTz),
       stage: String(t[5]), trackedMinutes: num_(t[6]), completedAt: isoText_(t[7])
     });
   }
@@ -888,6 +888,23 @@ function buildEveningEmail(data) {
       open.push(t);
     }
   }
+  // Each task row carries its project's colour (by id, else by name), like the log rows.
+  var colorById = {};
+  var colorByName = {};
+  var plist = data.projects || [];
+  for (i = 0; i < plist.length; i++) {
+    colorById['k' + plist[i].id] = plist[i].color;
+    colorByName['k' + plist[i].name] = plist[i].color;
+  }
+  function withColor(t) {
+    var c = colorById['k' + (t.projectId || '')] || colorByName['k' + (t.project || '')];
+    var copy = {};
+    for (var key in t) if (Object.prototype.hasOwnProperty.call(t, key)) copy[key] = t[key];
+    copy.color = safeColor_(c);
+    return copy;
+  }
+  for (i = 0; i < done.length; i++) done[i] = withColor(done[i]);
+  for (i = 0; i < open.length; i++) open[i] = withColor(open[i]);
   var openGroups = openTaskGroups_(open, date);
 
   var pending = num_(data.pendingPhoneCount);
@@ -1064,9 +1081,41 @@ var EM_LABEL = 'font-size:13px;font-weight:bold;letter-spacing:.1em;text-transfo
 // The page, the card and its rows: rows is the HTML of the card's table rows.
 function emailShell_(rows) {
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>WorkPulse</title></head>' +
-    '<body style="margin:0;background:#e7e3d6;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#1d2b24">' +
-    '<table role="presentation" width="620" align="center" cellpadding="0" cellspacing="0" style="max-width:620px;margin:0 auto;background:#fbfaf5;border:1px solid #dcd8cb">' +
+    '<body style="margin:0;background:#e7e3d6;padding:16px 8px;font-family:Arial,Helvetica,sans-serif;color:#1d2b24">' +
+    // Fluid up to 620 px, so a phone shows it at full size instead of shrinking a fixed-width card.
+    '<table role="presentation" width="100%" align="center" cellpadding="0" cellspacing="0" style="width:100%;max-width:620px;margin:0 auto;background:#fbfaf5;border:1px solid #dcd8cb">' +
     rows + '</table></body></html>';
+}
+
+var EM_RULE = '1px solid #e4e0d4';
+
+// One list row like WorkPulse's History: an optional time column, the project's colour bar beside the content, and a
+// figure on the right; a thin line under it. timeHtml null = no time column (task lists).
+function listRow_(color, timeHtml, bodyHtml, rightHtml) {
+  return '<tr>' +
+    (timeHtml === null ? '' : '<td width="44" valign="top" style="padding:12px 10px 12px 0;font-size:12px;color:#5d6b63;white-space:nowrap;border-bottom:' + EM_RULE + '">' + timeHtml + '</td>') +
+    '<td valign="top" style="padding:10px 12px;border-left:3px solid ' + safeColor_(color) + ';border-bottom:' + EM_RULE + '">' + bodyHtml + '</td>' +
+    '<td width="56" valign="top" align="right" style="padding:10px 0 10px 8px;font-size:14px;font-weight:bold;color:#1d2b24;white-space:nowrap;border-bottom:' + EM_RULE + '">' + rightHtml + '</td>' +
+    '</tr>';
+}
+
+// The second line of a row: short parts with space between them (no separators).
+function rowMeta_(parts, gapBelow) {
+  var out = [];
+  for (var i = 0; i < parts.length; i++) {
+    if (parts[i]) out.push('<span style="margin-right:12px">' + parts[i] + '</span>');
+  }
+  return out.length ? '<div style="font-size:12px;line-height:1.4;color:#5d6b63;margin:3px 0 ' + (gapBelow ? '6px' : '0') + '">' + out.join('') + '</div>' : '';
+}
+
+// A task row: title, then project and stage; tracked time on the right.
+function taskRow_(task, withProject) {
+  var note = stageNote_(task);
+  var tracked = num_(task.trackedMinutes) > 0 ? esc_(fmtHM_(num_(task.trackedMinutes))) : '';
+  return listRow_(task.color, null,
+    '<div style="font-size:14px;line-height:1.45;color:#1d2b24">' + esc_(task.title) + '</div>' +
+      rowMeta_([withProject ? esc_(task.project || '') : '', note ? esc_(note) : ''], false),
+    tracked ? tracked + '<div style="font-size:12px;font-weight:normal;color:#5d6b63">tracked</div>' : '');
 }
 
 function footerRow_(footer, sheetUrl) {
@@ -1209,23 +1258,40 @@ function emailHtml_(m) {
   }
 
   h.push('<tr><td style="padding:' + (m.standup ? '24px' : '16px') + ' 24px 4px"><div style="' + EM_LABEL + '">Logs &middot; ' + m.logCount + ' &middot; ' + esc_(fmtHM_(m.logMinutes)) + '</div></td></tr>');
+  // Logs as in WorkPulse's History: one row each, by time, with the time, the project's colour bar, the text, the
+  // project under it, the sub-tasks, and the minutes on the right; a thin line between rows.
   h.push('<tr><td style="padding:0 24px">');
-  if (m.groups.length === 0) {
+  var flat = [];
+  for (var g = 0; g < m.groups.length; g++) {
+    for (var k = 0; k < m.groups[g].logs.length; k++) flat.push({ log: m.groups[g].logs[k], name: m.groups[g].name, color: m.groups[g].color });
+  }
+  flat.sort(function (a, b) {
+    var x = String(a.log.time || '');
+    var y = String(b.log.time || '');
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
+  if (flat.length === 0) {
     h.push('<div style="border-top:2px solid #1d2b24;padding-top:8px;font-size:14px;color:#5d6b63">No logs yet today.</div>');
   } else {
+    // Time per project, biggest first, before the rows.
+    var totals = [];
+    for (var t = 0; t < m.groups.length; t++) {
+      totals.push('<span style="display:inline-block;margin:0 16px 4px 0;white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;background:' +
+        safeColor_(m.groups[t].color) + ';margin-right:6px"></span>' + esc_(m.groups[t].name) + ' <span style="font-weight:bold">' + esc_(fmtHM_(m.groups[t].minutes)) + '</span></span>');
+    }
+    h.push('<div style="font-size:13px;color:#1d2b24;padding:2px 0 6px">' + totals.join('') + '</div>');
     h.push('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:2px solid #1d2b24">');
-    for (var g = 0; g < m.groups.length; g++) {
-      var grp = m.groups[g];
-      h.push('<tr><td colspan="2" style="padding:' + (g === 0 ? '12px' : '14px') + ' 0 4px;font-size:15px;font-weight:bold"><span style="display:inline-block;width:10px;height:10px;background:' +
-        esc_(grp.color) + ';margin-right:8px"></span>' + esc_(grp.name) + ' <span style="color:#5d6b63;font-weight:normal">&middot; ' + esc_(fmtHM_(grp.minutes)) + '</span></td></tr>');
-      for (var k = 0; k < grp.logs.length; k++) {
-        h.push('<tr><td style="padding:3px 0 3px 18px;font-size:14px">' + esc_(grp.logs[k].description) +
-          '</td><td align="right" style="font-size:14px;font-weight:bold;white-space:nowrap">' + esc_(fmtHM_(num_(grp.logs[k].minutes))) + '</td></tr>');
-        var subs = grp.logs[k].subTasks || [];
-        for (var su = 0; su < subs.length; su++) {
-          h.push('<tr><td colspan="2" style="padding:1px 0 1px 36px;font-size:13px;color:#5d6b63">&ndash; ' + esc_(subs[su]) + '</td></tr>');
-        }
+    for (var f = 0; f < flat.length; f++) {
+      var lg = flat[f].log;
+      var subs = lg.subTasks || [];
+      var subHtml = '';
+      for (var su = 0; su < subs.length; su++) {
+        subHtml += '<div style="font-size:13px;line-height:1.5;color:#5d6b63;padding-left:12px">&ndash; ' + esc_(subs[su]) + '</div>';
       }
+      h.push(listRow_(flat[f].color, esc_(lg.time || ''),
+        '<div style="font-size:14px;line-height:1.45;color:#1d2b24">' + esc_(lg.description) + '</div>' +
+          rowMeta_([esc_(flat[f].name), subs.length ? subs.length + (subs.length === 1 ? ' sub-task' : ' sub-tasks') : ''], subs.length > 0) + subHtml,
+        esc_(fmtHM_(num_(lg.minutes)))));
     }
     h.push('</table>');
   }
@@ -1235,26 +1301,23 @@ function emailHtml_(m) {
   if (m.done.length === 0) {
     h.push('<div style="border-top:2px solid #1d2b24;margin-top:6px;font-size:14px;padding-top:8px;color:#5d6b63">None yet.</div>');
   } else {
-    var lines = [];
-    for (var d = 0; d < m.done.length; d++) lines.push('<div>' + esc_(m.done[d].title) + taskMeta_(m.done[d], true) + '</div>');
-    h.push('<div style="border-top:2px solid #1d2b24;margin-top:6px;font-size:14px;line-height:1.7;padding-top:8px;color:#1d2b24">' + lines.join('') + '</div>');
+    h.push('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:2px solid #1d2b24;margin-top:6px">');
+    for (var d = 0; d < m.done.length; d++) h.push(taskRow_(m.done[d], true));
+    h.push('</table>');
   }
   h.push('</td></tr>');
 
   h.push('<tr><td style="padding:18px 24px 4px"><div style="' + EM_LABEL + '">Still open &middot; ' + m.openCount + '</div>');
-  h.push('<div style="border-top:2px solid #1d2b24;margin-top:6px;padding-top:8px;font-size:14px;line-height:1.7">');
   if (m.openGroups.length === 0) {
-    h.push('<span style="color:#5d6b63">Nothing open.</span>');
-  }
-  for (var o = 0; o < m.openGroups.length; o++) {
-    h.push('<div style="font-weight:bold;margin-top:' + (o === 0 ? '0' : '8px') + '">' + esc_(m.openGroups[o].label) + '</div>');
-    for (var q = 0; q < m.openGroups[o].tasks.length; q++) {
-      var task = m.openGroups[o].tasks[q];
-      var note = stageNote_(task);
-      h.push('<div style="padding-left:18px">' + esc_(task.title) + (note ? ' <span style="color:#5d6b63">(' + note + ')</span>' : '') + taskMeta_(task, false) + '</div>');
+    h.push('<div style="border-top:2px solid #1d2b24;margin-top:6px;padding-top:8px;font-size:14px;color:#5d6b63">Nothing open.</div>');
+  } else {
+    h.push('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:2px solid #1d2b24;margin-top:6px">');
+    for (var o = 0; o < m.openGroups.length; o++) {
+      h.push('<tr><td colspan="2" style="padding:14px 0 4px;font-size:13px;font-weight:bold;color:#1d2b24;border-bottom:' + EM_RULE + '">' + esc_(m.openGroups[o].label) + '</td></tr>');
+      for (var q = 0; q < m.openGroups[o].tasks.length; q++) h.push(taskRow_(m.openGroups[o].tasks[q], true));
     }
+    h.push('</table>');
   }
-  h.push('</div>');
   if (m.pendingLine) {
     h.push('<div style="font-size:13px;color:#7a5a00;margin-top:8px;font-weight:bold">' + esc_(m.pendingLine) + '</div>');
   }

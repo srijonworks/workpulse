@@ -89,7 +89,7 @@ describe('evening email: content', () => {
     expect(html).toContain('&ndash; Filter by team');
     expect(html).toContain('Fix &lt;b&gt;timezone&lt;/b&gt;');
     expect(text).toContain('      - Filter by team');
-    expect(html).toContain('BGB Portal · 0:30 tracked');
+    expect(html).toMatch(/Deploy suggestions build<\/div>[^]*BGB Portal[^]*0:30<div[^>]*>tracked</);
     expect(text).toContain('Deploy suggestions build · BGB Portal · 0:30 tracked');
   });
 
@@ -138,7 +138,7 @@ describe('evening email: content', () => {
     expect(at_('Send attendance report')).toBeLessThan(at_('>Yesterday<'));
     expect(at_('Draft RFC for search indexing')).toBeGreaterThan(at_('>Yesterday<'));
     expect(at_('Draft RFC for search indexing')).toBeLessThan(at_('>Sun 8 Nov<'));
-    expect(html).toContain('(blocked)');
+    expect(html).toMatch(/Review leave form API<\/div>[^]*>blocked</);
   });
 
   it('escapes every user text in the HTML and keeps the plain text free of tags', () => {

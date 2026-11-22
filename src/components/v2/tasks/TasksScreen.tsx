@@ -194,19 +194,19 @@ const TasksScreenView: React.FC<TasksScreenProps> = ({
           })}
         </div>
       )}
-        <div role="group" aria-label="Show" className="ml-auto inline-flex">
+        <div role="group" aria-label="Show" className="ml-auto flex gap-2">
           {(
             [
               ['open', 'Open', openCount],
               ['done', 'Done', sections.done.length],
             ] as const
-          ).map(([v, label, n], i) => (
+          ).map(([v, label, n]) => (
             <button
               key={v}
               type="button"
               aria-pressed={view === v}
               onClick={() => setView(v)}
-              className={`v2-btn ${view === v ? 'v2-btn-strong' : ''} ${i === 0 ? 'rounded-r-none' : 'rounded-l-none -ml-px'} inline-flex items-center gap-2 min-h-8 pointer-coarse:min-h-11 px-3 cursor-pointer transition-colors`}
+              className={`v2-btn ${view === v ? 'v2-btn-strong' : ''} inline-flex items-center gap-2 min-h-8 pointer-coarse:min-h-11 px-3 cursor-pointer transition-colors`}
             >
               {label}
               <span className="num">{n}</span>
