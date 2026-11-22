@@ -8,6 +8,7 @@ const SCOPE_OF: Record<string, string | null> = {
   MailApp: 'https://www.googleapis.com/auth/script.send_mail',
   ScriptApp: 'https://www.googleapis.com/auth/script.scriptapp',
   Session: 'https://www.googleapis.com/auth/userinfo.email',
+  UrlFetchApp: 'https://www.googleapis.com/auth/script.external_request',
   // these need no permission
   ContentService: null,
   HtmlService: null,

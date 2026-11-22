@@ -25,7 +25,18 @@ export interface FakeTrigger {
   // One-off triggers (timeBased().after(ms)): the delay and the instant they are due.
   afterMs?: number;
   at?: number;
+  // Repeating triggers (timeBased().everyMinutes(n)).
+  everyMinutes?: number;
 }
+
+export interface FetchCall {
+  url: string;
+  payload?: string;
+  headers: Record<string, string>;
+}
+
+// Answers one UrlFetchApp.fetch call; throw to act like a network failure.
+export type FetchFake = (call: FetchCall) => { code: number; body: string };
 
 export interface FakeHtmlOutput {
   kind: 'html';
@@ -54,6 +65,9 @@ export interface ScriptHarness {
   failMail(message: string | null): void;
   // Emails left for the day; sendEmail throws the daily-limit error at 0 and each mail uses one.
   setMailQuota(n: number): void;
+  // Answers UrlFetchApp.fetch (null = fetch throws, as without the permission). Every call is kept in fetches.
+  setFetch(fn: FetchFake | null): void;
+  fetches: FetchCall[];
   // Runs, as fresh executions, every one-off trigger that is due at the current fake time (they stay listed until the script deletes them).
   fireDueTriggers(): number;
 }
@@ -132,6 +146,8 @@ export function createScriptHarness(opts: { spreadsheetTz?: string; now?: Date }
   let lockContended = false;
   let mailError: string | null = null;
   let mailQuota = 100;
+  let fetchFake: FetchFake | null = null;
+  const fetches: FetchCall[] = [];
 
   // A value written to a cell, as Sheets stores it.
   function stored(name: string, r: number, c: number, v: unknown): unknown {
@@ -300,6 +316,7 @@ export function createScriptHarness(opts: { spreadsheetTz?: string; now?: Date }
     const b = {
       timeBased: () => b,
       everyDays: () => b,
+      everyMinutes: (m: number) => ((t.everyMinutes = m), b),
       atHour: (h: number) => ((t.hour = h), b),
       nearMinute: (m: number) => ((t.minute = m), b),
       inTimezone: (tz: string) => ((t.tz = tz), b),
@@ -420,6 +437,16 @@ export function createScriptHarness(opts: { spreadsheetTz?: string; now?: Date }
       },
       getRemainingDailyQuota: () => mailQuota,
     },
+    // No fake set: fetch throws like a script without the external-request permission.
+    UrlFetchApp: {
+      fetch(url: string, params: any = {}) {
+        const call: FetchCall = { url, payload: params.payload, headers: params.headers ?? {} };
+        fetches.push(call);
+        if (!fetchFake) throw new Error('You do not have permission to call UrlFetchApp.fetch.');
+        const r = fetchFake(call);
+        return { getResponseCode: () => r.code, getContentText: () => r.body };
+      },
+    },
     ScriptApp: {
       getProjectTriggers: () =>
         triggers.map((t) => ({ getHandlerFunction: () => t.fn, getUniqueId: () => t.id })),
@@ -472,6 +499,7 @@ export function createScriptHarness(opts: { spreadsheetTz?: string; now?: Date }
     props,
     mails,
     triggers,
+    fetches,
     get lockCalls() {
       return lockCalls;
     },
@@ -492,6 +520,9 @@ export function createScriptHarness(opts: { spreadsheetTz?: string; now?: Date }
     },
     setMailQuota(n: number) {
       mailQuota = n;
+    },
+    setFetch(fn: FetchFake | null) {
+      fetchFake = fn;
     },
     fireDueTriggers() {
       const due = triggers.filter((t) => t.at !== undefined && t.at <= nowMs);

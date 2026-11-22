@@ -302,6 +302,33 @@ ipcMain.on('wp:flushed', (event) => {
   if (fromOurPage(event) && flushWaiter) flushWaiter();
 });
 
+// ---- The last push to the Google Sheet before Windows shuts down ----
+// The Sheet sends the day's email from what the PC pushed (the clock-out above all). The page says whether the Sheet is
+// behind; if it is when Windows asks to end the session, the shutdown is held while the page pushes (at most
+// FINAL_PUSH_MS), then the app exits and Windows goes on. Nothing is held when the Sheet is up to date.
+const FINAL_PUSH_MS = 8000;
+let sheetPending = false;
+let finalWaiter = null;
+ipcMain.on('wp:sheet-pending', (event, pending) => {
+  if (fromOurPage(event)) sheetPending = pending === true;
+});
+ipcMain.on('wp:final-pushed', (event) => {
+  if (fromOurPage(event) && finalWaiter) finalWaiter();
+});
+function finalPush() {
+  return new Promise((resolve) => {
+    if (!win || win.isDestroyed() || win.webContents.isLoading()) return resolve();
+    const done = () => {
+      clearTimeout(timer);
+      finalWaiter = null;
+      resolve();
+    };
+    const timer = setTimeout(done, FINAL_PUSH_MS);
+    finalWaiter = done;
+    win.webContents.send('wp:final-push');
+  });
+}
+
 function showWindow() {
   // If the window was ever lost (it is only ever hidden), make a new one instead of leaving a tray with nothing behind it.
   if (!win || win.isDestroyed()) {
@@ -503,8 +530,26 @@ app.on('before-quit', (e) => {
 function setupPowerFlush() {
   const { powerMonitor } = require('electron');
   for (const ev of ['suspend', 'lock-screen']) powerMonitor.on(ev, () => void flushPage());
+  // Going to sleep: also try one push to the Sheet (sleep cannot be held, so this is a best effort).
+  powerMonitor.on('suspend', () => {
+    if (sheetPending) void finalPush();
+  });
+  if (!win) return;
+  // Windows asks whether the session may end (shutdown, restart, sign-out). When the Sheet is behind, hold it: Windows
+  // shows "WorkPulse is preventing shutdown" while the page pushes, and goes on once the app has exited.
+  let ending = false;
+  win.on('query-session-end', (e) => {
+    if (!sheetPending || ending) return;
+    e.preventDefault();
+    ending = true;
+    quitting = true;
+    finalPush()
+      .then(() => flushPage())
+      .catch(() => {})
+      .then(() => app.exit(0));
+  });
   // Windows is signing out or shutting down: ask the page to save at once (it saves synchronously; we cannot wait here).
-  if (win) win.on('session-end', () => win && !win.isDestroyed() && win.webContents.send('wp:flush'));
+  win.on('session-end', () => win && !win.isDestroyed() && win.webContents.send('wp:flush'));
 }
 
 // WorkPulse starts with Windows, hidden in the tray. This is set once (a later choice in the tray menu is kept).

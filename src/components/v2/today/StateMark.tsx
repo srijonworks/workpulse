@@ -43,6 +43,26 @@ export const StateMark: React.FC<{ state: TaskState; className?: string }> = ({ 
   );
 };
 
+const PILL_WORD: Record<TaskState, string> = { running: 'running', paused: 'paused', blocked: 'blocked', upnext: 'planned', done: 'done' };
+const PILL_TONE: Record<TaskState, string> = {
+  running: 'text-[var(--accent-text)]',
+  paused: 'text-[var(--warning)]',
+  blocked: 'text-[var(--danger)]',
+  upnext: 'text-[var(--text-muted)]',
+  done: 'text-[var(--text-muted)]',
+};
+
+/** A task's state as a pill: the mark plus the word, so colour is never the only signal. */
+export const StatePill: React.FC<{ state: TaskState }> = ({ state }) => (
+  <span
+    data-state={state}
+    className={`inline-flex items-center gap-1 shrink-0 px-2 leading-5 rounded-full border border-[var(--border-control)] text-[length:var(--fs-small)] font-semibold ${PILL_TONE[state]}`}
+  >
+    <StateMark state={state} className="w-3 h-3 !text-current" />
+    {PILL_WORD[state]}
+  </span>
+);
+
 /** The state a task row shows a mark for. */
 export const rowState = (stage: string, running: boolean): TaskState =>
   running ? 'running' : stage === 'done' ? 'done' : stage === 'blocked' ? 'blocked' : stage === 'planned' ? 'upnext' : 'paused';

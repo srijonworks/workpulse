@@ -1,3 +1,5 @@
+import { GEMINI_MODEL_CASCADE } from '../geminiModels';
+
 // The evening email of the WorkPulse Apps Script: the pure builder, the daily send with its once-a-day
 // guard, and the setEmail / sendTestEmail desktop actions. Plain ES5-style Apps Script text, appended
 // after SCRIPT_CORE in googleAppsScriptTemplate.ts (it uses the core's helpers: readTab_, getMeta_, ...).
@@ -12,21 +14,32 @@
 // public handler), which first sends the standup emails that are due and removes their triggers.
 // Version 7: a day's standup email is the designed evening email for that date with the standup as its first section
 // (standupHtml_: marks drawn, bullets grouped per project); a week's is the standup alone in the same card.
+// Version 8: "when I clock out" is run by the Sheet itself, so a PC shut down at once still gets its email. setEmail with
+// when: 'clockout' sets a timer every 15 minutes (handler sendEveningEmail) that sends each closed day (and on a Thursday the
+// week) from the Sheet's own tabs: the PC's standup when it is there, else one written with the owner's Gemini key (Script
+// Property geminiKey, set by setEmail, never sent back), else plain wording from the logs. A Gemini failure of any kind
+// (rate limit, bad key, no permission, slow) only means plain wording: the email always goes.
+
 export const SCRIPT_EMAIL = String.raw`
 // =========================================================================
 // Evening email
 // =========================================================================
 
 var EMAIL_FN = 'sendEveningEmail';
+var GEMINI_MODELS = ${JSON.stringify(GEMINI_MODEL_CASCADE)};
 
 // ---- Desktop actions ----
 
-// { token, enabled, hour, minute, tz }: one daily trigger when enabled, none when not.
+// { token, enabled, hour, minute, tz, to?, when?, geminiKey? }: when 'fixed' (or absent, as before version 8) one daily
+// trigger at the hour; when 'clockout' one trigger every 15 minutes that sends each closed day (sweepStandups_). None when off.
+// geminiKey: a text saves it ('' removes it), absent keeps the saved one. It is never sent back.
 function setEmailAction_(c) {
   var check = checkToken(c.token);
   if (!check.ok) return errorOf_(check);
   if (c.enabled !== true && c.enabled !== false) return badRequest_();
+  if (c.when != null && c.when !== 'clockout' && c.when !== 'fixed') return badRequest_();
   var props = PropertiesService.getScriptProperties();
+  var clockout = c.when === 'clockout';
   var hour = c.hour;
   var minute = c.minute;
   var tz = str_(c.tz).slice(0, 100);
@@ -34,7 +47,12 @@ function setEmailAction_(c) {
   var hasTo = typeof c.to === 'string';
   var to = hasTo ? recipients_(c.to) : null;
   if (hasTo && to === null) return badRequest_('Enter an email address, or several separated by commas (at most 5).');
-  if (c.enabled) {
+  var hasKey = typeof c.geminiKey === 'string';
+  var key = hasKey ? c.geminiKey.replace(/^\s+|\s+$/g, '') : '';
+  if (hasKey && key !== '' && !/^[A-Za-z0-9_\-]{10,200}$/.test(key)) return badRequest_('That Gemini key does not look right.');
+  if (c.enabled && clockout) {
+    if (!validZone_(tz)) return badRequest_('That time zone is not known.');
+  } else if (c.enabled) {
     if (typeof hour !== 'number' || hour % 1 !== 0 || hour < 0 || hour > 23 ||
         typeof minute !== 'number' || minute % 1 !== 0 || minute < 0 || minute > 59) {
       return badRequest_('Pick a time of day between 00:30 and 23:29.');
@@ -54,16 +72,26 @@ function setEmailAction_(c) {
       try {
         saved = JSON.parse(props.getProperty('email') || '{}') || {};
       } catch (err) {}
-      if (c.enabled) {
+      if (c.enabled && clockout) {
+        ScriptApp.newTrigger(EMAIL_FN).timeBased().everyMinutes(SWEEP_EVERY_MINUTES).create();
+        // Days before this one are never swept, so switching it on does not mail old days.
+        var since = saved.enabled === true && saved.when === 'clockout' && isDateText_(saved.since) ? saved.since : todayIn_(tz);
+        saved = { enabled: true, when: 'clockout', hour: saved.hour, minute: saved.minute, tz: tz, to: saved.to, since: since };
+      } else if (c.enabled) {
         ScriptApp.newTrigger(EMAIL_FN).timeBased().atHour(hour).nearMinute(minute).everyDays(1).inTimezone(tz).create();
-        saved = { enabled: true, hour: hour, minute: minute, tz: tz, to: saved.to };
+        saved = { enabled: true, when: 'fixed', hour: hour, minute: minute, tz: tz, to: saved.to };
       } else {
         saved.enabled = false;
       }
       if (hasTo) saved.to = to;
       removeTriggers_(old);
       props.setProperty('email', JSON.stringify(saved));
-      return { status: 'ok', enabled: !!saved.enabled, hour: saved.hour, minute: saved.minute, tz: saved.tz, to: saved.to || '' };
+      if (hasKey && key !== '') props.setProperty('geminiKey', key);
+      else if (hasKey) props.deleteProperty('geminiKey');
+      return {
+        status: 'ok', enabled: !!saved.enabled, when: saved.when === 'clockout' ? 'clockout' : 'fixed', hour: saved.hour, minute: saved.minute,
+        tz: saved.tz, to: saved.to || '', geminiKey: !!props.getProperty('geminiKey')
+      };
     });
   } catch (error) {
     console.error(error);
@@ -111,7 +139,10 @@ function authorizeWorkPulse() {
     ['your Sheet', function () { SpreadsheetApp.getActiveSpreadsheet().getName(); }],
     ['sending email', function () { MailApp.getRemainingDailyQuota(); }],
     ['the daily timer', function () { ScriptApp.getProjectTriggers(); }],
-    ['your email address', function () { Session.getEffectiveUser().getEmail(); }]
+    ['your email address', function () { Session.getEffectiveUser().getEmail(); }],
+    ['calling Gemini (optional: without it the standup uses plain wording)', function () {
+      UrlFetchApp.fetch('https://generativelanguage.googleapis.com/', { muteHttpExceptions: true });
+    }]
   ];
   var failed = 0;
   for (var i = 0; i < steps.length; i++) {
@@ -132,8 +163,9 @@ function authorizeWorkPulse() {
 // local date (lastEmailDate is set only after the mail went out), and only when the day has a log or a
 // clock-in. google.script.run can call it too, so it never takes input and never sends anywhere but to
 // the owner. The moment and the date are read once, so a run across local midnight stays on one date.
+// With "when I clock out" (version 8) it sweeps the closed days instead, and never sends the fixed-time email.
 function sendEveningEmail() {
-  return withLock(function () {
+  var res = withLock(function () {
     var props = PropertiesService.getScriptProperties();
     processDueDayEmails_();
     var settings = {};
@@ -141,6 +173,7 @@ function sendEveningEmail() {
       settings = JSON.parse(props.getProperty('email') || '{}') || {};
     } catch (err) {}
     if (settings.enabled !== true) return { sent: false };
+    if (settings.when === 'clockout') return { sent: false, sweep: dueStandups_(new Date(), getMeta_(), settings) };
     var now = new Date();
     var meta = getMeta_();
     // Anyone with the link can call this function, so it only sends near the saved time. Calling it early
@@ -154,6 +187,9 @@ function sendEveningEmail() {
     props.setProperty('lastEmailDate', today);
     return { sent: true };
   });
+  if (!res.sweep) return res;
+  // The writing (a Gemini call can take seconds) happens outside the lock, so the PC's pushes are not held up.
+  return { sent: sweepStandups_(res.sweep) > 0 };
 }
 
 // True when now, on the clock of the saved zone, is within 45 minutes of the saved hour and minute.
@@ -337,22 +373,25 @@ function deleteTriggerById_(id) {
 
 // The newest saved standup text for a target, or ''.
 function standupText_(target) {
+  return standupTexts_()[target.kind + '|' + target.from + '|' + target.to] || '';
+}
+
+// Every saved standup as { 'kind|from|to': newest text }, from one read of the tab.
+function standupTexts_() {
   var ssTz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
   var rows = readTab_('WorkPulse_Standups');
-  var best = '';
-  var bestAt = '';
-  var found = false;
+  var best = {};
+  var bestAt = {};
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
-    if (String(r[1]) !== target.kind || dateText_(r[2], ssTz) !== target.from || dateText_(r[3], ssTz) !== target.to) continue;
+    var key = String(r[1]) + '|' + dateText_(r[2], ssTz) + '|' + dateText_(r[3], ssTz);
     var at = String(r[7] || r[6] || '');
-    if (!found || at >= bestAt) {
-      best = String(r[4] || '');
-      bestAt = at;
-      found = true;
+    if (!Object.prototype.hasOwnProperty.call(bestAt, key) || at >= bestAt[key]) {
+      best[key] = String(r[4] || '').replace(/^\s+|\s+$/g, '');
+      bestAt[key] = at;
     }
   }
-  return best.replace(/^\s+|\s+$/g, '');
+  return best;
 }
 
 function dayEmailMail_(target, text) {
@@ -365,13 +404,257 @@ function dayEmailMail_(target, text) {
     return composeEmail_(false, new Date(), getMeta_(), { date: target.from, standup: text, when: 'clockout', sheetUrl: sheetUrl });
   }
   var subject = 'WorkPulse week standup \u00b7 ' + dayText_(target.from, 'd MMM') + ' to ' + dayText_(target.to, 'd MMM');
+  // A week reads "this week", not "today" (the day email keeps "today").
+  text = String(text).replace(/completed today/gi, 'completed this week');
   var footer = 'Sent by your WorkPulse script.';
+  // The same top as the day email, summed over the week: worked of target, days and clock times, last data from the PC.
+  var meta = getMeta_();
+  var tz = userTz_(meta);
+  var ssTz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+  var dayRows = readTab_('WorkPulse_Days');
+  var worked = 0;
+  var days = 0;
+  var open = 0;
+  for (var i = 0; i < dayRows.length; i++) {
+    var dd = dateText_(dayRows[i][0], ssTz);
+    if (dd < target.from || dd > target.to) continue;
+    var cin = emailDate_(isoText_(dayRows[i][1]));
+    var cout = emailDate_(isoText_(dayRows[i][2]));
+    if (!cin) continue;
+    days++;
+    if (cout) worked += Math.max(0, Math.floor((cout.getTime() - cin.getTime()) / 60000));
+    else open++;
+  }
+  var perDay = num_(meta.workdayHours) > 0 ? num_(meta.workdayHours) : DEFAULT_WORKDAY_HOURS;
+  var pushed = emailDate_(meta.pushedAt);
+  var range = dayText_(target.from, 'd MMM') + ' to ' + dayText_(target.to, 'd MMM');
+  var daysLine = days === 0 ? 'no clocked days' : days + (days === 1 ? ' day' : ' days') + (open ? ' · ' + open + ' without a clock-out' : '');
+  var dataLine = pushed
+    ? 'The last data from your PC came on ' + Utilities.formatDate(pushed, tz, 'EEE d MMM') + ' at ' + clockTime_(pushed, tz) + '.'
+    : 'No data from your PC yet.';
   var html = emailShell_(
-    '<tr><td style="background:#0f3d2e;color:#f4f1e8;padding:18px 24px"><div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#afbbb0;font-weight:bold">Week standup</div>' +
-      '<div style="font-size:26px;font-weight:bold;color:#f2b705;margin-top:6px;line-height:1.1">' + esc_(dayText_(target.from, 'd MMM') + ' to ' + dayText_(target.to, 'd MMM')) + '</div></td></tr>' +
-      '<tr><td style="padding:16px 24px 4px"><div style="border-top:2px solid #1d2b24;padding-top:8px">' + standupHtml_(text) + '</div></td></tr>' +
+    '<tr><td style="background:#0f3d2e;color:#f4f1e8;padding:18px 24px"><div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#afbbb0;font-weight:bold">Week standup · ' + esc_(range) + '</div>' +
+      '<div style="font-size:38px;font-weight:bold;color:#f2b705;margin-top:6px;line-height:1">' + esc_(fmtHM_(worked)) +
+      ' <span style="font-size:15px;color:#f4f1e8;font-weight:normal">worked of ' + esc_(fmtHM_(Math.round(perDay * 60 * days))) + '</span></div>' +
+      '<div style="font-size:14px;margin-top:8px;color:#f4f1e8">' + esc_(daysLine) + '</div></td></tr>' +
+      '<tr><td style="padding:6px 24px 0"><div style="font-size:12px;color:#5d6b63;padding:10px 0;border-bottom:1px solid #dcd8cb">' + esc_(dataLine) + '</div></td></tr>' +
+      '<tr><td style="padding:16px 24px 4px"><div style="' + EM_LABEL + '">Standup</div></td></tr>' +
+      '<tr><td style="padding:0 24px"><div style="border-top:2px solid #1d2b24;padding-top:10px;color:#1d2b24">' + standupHtml_(text) + '</div></td></tr>' +
       footerRow_(footer, sheetUrl));
   return { subject: subject, html: html, text: standupPlain_(text) + (sheetUrl ? '\n\nYour WorkPulse Sheet: ' + sheetUrl : '') };
+}
+
+// ---- The Sheet's own standup emails (version 8) ----
+//
+// With "when I clock out" a timer runs sendEveningEmail every 15 minutes. It looks at the last few days in WorkPulse_Days
+// (pushed by the PC seconds after a clock-out) and sends each day that is closed and has a log or a standup: at once when
+// the PC's standup is there, else 10 minutes after the clock-out with a standup the Sheet writes itself. A day still open
+// after its date (a forgotten clock-out) goes after midnight. A Thursday also sends the week (Friday to Thursday).
+// The emailLog keys are the same as the PC's sendDayEmail, so a day is never sent twice, whoever sends it first.
+
+var SWEEP_EVERY_MINUTES = 15;
+var SWEEP_GRACE_MS = 10 * 60000;
+var SWEEP_DAYS = 3;
+var GEMINI_BUDGET_MS = 90000;
+var GEMINI_SYSTEM = 'You turn raw task logs into a concise, human-ready work standup, without filler or marketing words. Follow the requested format exactly.';
+
+// Day of the week of 'yyyy-MM-dd' (0 = Sunday, 4 = Thursday), with no zone involved.
+function weekdayOf_(dateText) {
+  var p = dateText.split('-');
+  return new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]))).getUTCDay();
+}
+
+// True when the sweep must leave this email alone: sent, waiting for its timer, or out of tries.
+function sweepSkips_(entry) {
+  if (!entry) return false;
+  if (entry.s === 's' || entry.s === 'p') return true;
+  return num_(entry.n) >= DAY_EMAIL_TRIES || entry.e === 'address';
+}
+
+// The emails due now, as [{ kind, from, to, key, text }] (text '' = none saved yet). Reads only; run under the lock.
+function dueStandups_(now, meta, settings) {
+  var tz = userTz_(meta);
+  var ssTz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+  var today = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+  var oldest = addDays_(today, -SWEEP_DAYS);
+  if (isDateText_(settings.since) && settings.since > oldest) oldest = settings.since;
+  var i;
+  var logDays = {};
+  var logRows = readTab_('WorkPulse_Recent');
+  for (i = 0; i < logRows.length; i++) {
+    if (logRows[i][0] !== '') logDays[dateText_(logRows[i][1], ssTz)] = true;
+  }
+  var days = {};
+  var dayRows = readTab_('WorkPulse_Days');
+  for (i = 0; i < dayRows.length; i++) {
+    var dd = dateText_(dayRows[i][0], ssTz);
+    if (isDateText_(dd)) days[dd] = { clockIn: emailDate_(isoText_(dayRows[i][1])), clockOut: emailDate_(isoText_(dayRows[i][2])) };
+  }
+  var texts = standupTexts_();
+  var list = dayEmailLog_();
+  var out = [];
+  function add(kind, from, to, hasLogs, waitUntil) {
+    var key = kind + '|' + from + '|' + to;
+    var text = texts[key] || '';
+    if (!hasLogs && text === '') return;
+    if (text === '' && waitUntil && now.getTime() < waitUntil) return;
+    if (sweepSkips_(dayEmailEntry_(list, key))) return;
+    out.push({ kind: kind, from: from, to: to, key: key, text: text });
+  }
+  for (var d = oldest; d <= today; d = addDays_(d, 1)) {
+    var w = days[d];
+    if (!w || !w.clockIn) continue;
+    // Closed: clocked out, or still open after its date. A clock-out waits a little for the PC's standup.
+    if (!w.clockOut && d >= today) continue;
+    var waitUntil = w.clockOut ? w.clockOut.getTime() + SWEEP_GRACE_MS : 0;
+    add('day', d, d, logDays[d] === true, waitUntil);
+    if (weekdayOf_(d) === 4) {
+      var from = addDays_(d, -6);
+      var weekLogs = false;
+      for (var x = from; x <= d; x = addDays_(x, 1)) if (logDays[x] === true) weekLogs = true;
+      add('week', from, d, weekLogs, waitUntil);
+    }
+  }
+  return out;
+}
+
+// Writes and sends the due emails. Returns how many went. A standup the Sheet wrote is saved to WorkPulse_Standups, so the
+// email, the week and the Sheet show the same text; a standup from the PC later replaces it there (same id).
+function sweepStandups_(targets) {
+  var sent = 0;
+  var deadline = new Date().getTime() + GEMINI_BUDGET_MS;
+  for (var i = 0; i < targets.length; i++) {
+    var t = targets[i];
+    var made = t.text === '' ? writeStandup_(t, deadline) : { text: t.text, writer: '' };
+    if (made.text === '') continue;
+    var res = tryLocked_(function () {
+      var list = dayEmailLog_();
+      var entry = dayEmailEntry_(list, t.key);
+      if (sweepSkips_(entry)) return false;
+      if (made.writer && standupText_(t) === '') {
+        upsertByKey_('WorkPulse_Standups', [[t.kind === 'day' ? 'day:' + t.from : 'week:' + t.to, t.kind, t.from, t.to,
+          made.text.slice(0, STANDUP_MAX), made.writer, new Date().toISOString(), '']]);
+      }
+      if (!entry) {
+        entry = { k: t.key, s: 'f', t: 0, n: 0, e: '', g: '', q: 'sheet' };
+        list.push(entry);
+      }
+      entry.d = false;
+      attemptDayEmail_(list, entry);
+      return entry.s === 's';
+    });
+    if (res.got && res.value) sent++;
+  }
+  return sent;
+}
+
+// The logs of a date range from WorkPulse_Recent.
+function rangeLogs_(from, to) {
+  var ssTz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+  var rows = readTab_('WorkPulse_Recent');
+  var out = [];
+  for (var i = 0; i < rows.length; i++) {
+    var l = rows[i];
+    if (l[0] === '') continue;
+    var date = dateText_(l[1], ssTz);
+    if (date < from || date > to) continue;
+    out.push({ date: date, project: String(l[3] || '') || 'No project', description: String(l[5] || ''), status: String(l[6] || ''), minutes: num_(l[7]) });
+  }
+  return out;
+}
+
+// { text, writer }: Gemini when it answers, else plain wording. Never throws for a Gemini problem.
+function writeStandup_(t, deadline) {
+  var logs = rangeLogs_(t.from, t.to);
+  if (logs.length === 0) return { text: '', writer: '' };
+  var ai = '';
+  try {
+    ai = geminiStandup_(standupPrompt_(t, logs), deadline);
+  } catch (err) {
+    ai = '';
+  }
+  if (ai) return { text: ai, writer: 'gemini' };
+  return { text: templateStandup_(t, logs), writer: 'template' };
+}
+
+function standupPrompt_(t, logs) {
+  var lines = [];
+  for (var i = 0; i < logs.length && i < 80; i++) {
+    var l = logs[i];
+    lines.push((i + 1) + '. [' + l.status.toUpperCase() + '] [Project: ' + l.project + '] ' + (t.kind === 'week' ? l.date + ' ' : '') +
+      l.description.slice(0, 300) + (l.minutes ? ' (' + l.minutes + 'm)' : ''));
+  }
+  var when = t.kind === 'week' ? 'this week' : 'today';
+  return 'Please generate a work report based on these logged tasks:\n\n--- LOGGED WORK ENTRIES ---\n' + lines.join('\n') +
+    '\n---------------------------\n\nCovers: ' + (t.kind === 'week' ? 'the week ' + t.from + ' to ' + t.to : t.from) +
+    '\n\nTarget Format: A clean, professional Slack/Teams standup update with exactly three sections. Use plain bold headings with no emoji. ' +
+    'Under each heading write short bullets, one per piece of work, starting with the project name in bold (for example "- *project:* what was done"). ' +
+    'No filler and no exclamation marks. The sections are:\n*What I completed ' + when + ':*\n*In progress / Rolling over:*\n*Blockers / Waiting on:*\n' +
+    'Tone: casual\n\nGenerate the final message text now. Output it directly, with no code fence.';
+}
+
+// The standup in plain wording: the logs under the same three headings, one bullet each, project first.
+function templateStandup_(t, logs) {
+  function bullet(l) {
+    return '- *' + l.project.replace(/[*:]/g, '') + ':* ' + l.description.replace(/\*/g, '').replace(/\s+/g, ' ');
+  }
+  var done = [];
+  var going = [];
+  var blocked = [];
+  for (var i = 0; i < logs.length; i++) {
+    if (logs[i].status === 'in_progress') going.push(bullet(logs[i]));
+    else if (logs[i].status === 'blocked') blocked.push(bullet(logs[i]));
+    else done.push(bullet(logs[i]));
+  }
+  return '*What I completed ' + (t.kind === 'week' ? 'this week' : 'today') + ':*\n' + (done.length ? done.join('\n') : '- Nothing marked done') +
+    '\n\n*In progress / Rolling over:*\n' + (going.length ? going.join('\n') : '- None') +
+    '\n\n*Blockers / Waiting on:*\n' + (blocked.length ? blocked.join('\n') : '- None');
+}
+
+// The standup from Gemini with the saved key, trying each model in turn, or '' (no key, no permission, rate limit, bad
+// answer, or the time budget used up). A rate limit or server error moves on to the next model; a refused key stops.
+function geminiStandup_(prompt, deadline) {
+  var key = PropertiesService.getScriptProperties().getProperty('geminiKey');
+  if (!key) return '';
+  var body = JSON.stringify({
+    systemInstruction: { parts: [{ text: GEMINI_SYSTEM }] },
+    contents: [{ role: 'user', parts: [{ text: prompt }] }]
+  });
+  for (var i = 0; i < GEMINI_MODELS.length; i++) {
+    if (new Date().getTime() >= deadline) return '';
+    var res;
+    try {
+      res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODELS[i] + ':generateContent', {
+        method: 'post', contentType: 'application/json', payload: body, headers: { 'x-goog-api-key': key }, muteHttpExceptions: true
+      });
+    } catch (err) {
+      return '';
+    }
+    var code = res.getResponseCode();
+    if (code === 200) {
+      var text = geminiText_(res.getContentText());
+      if (text) return text;
+    } else if (code === 401 || code === 403) {
+      return '';
+    }
+  }
+  return '';
+}
+
+function geminiText_(raw) {
+  try {
+    var data = JSON.parse(raw);
+    var parts = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
+    if (!isArray_(parts)) return '';
+    var text = '';
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i] && typeof parts[i].text === 'string' && parts[i].thought !== true) text += parts[i].text;
+    }
+    text = text.replace(/^\s*\x60\x60\x60[a-z]*\s*\n?/i, '').replace(/\n?\s*\x60\x60\x60\s*$/, '').replace(/^\s+|\s+$/g, '');
+    return text.slice(0, STANDUP_MAX);
+  } catch (err) {
+    return '';
+  }
 }
 
 // One send try for an entry. The try is counted and saved before the mail goes, so a crash cannot hide a try.
@@ -581,7 +864,10 @@ function buildEveningEmail(data) {
   else clockLine = 'In ' + clockTime_(clockIn, tz) + ' \u00b7 still clocked in';
 
   var dataLine;
-  if (pushedToday) {
+  if (data.when === 'clockout' && pushed) {
+    // A closed day's email can go out later (by the Sheet, or caught up): it names when the PC last sent data.
+    dataLine = 'Data from your PC as of ' + Utilities.formatDate(pushed, tz, 'EEE d MMM') + ' at ' + clockTime_(pushed, tz) + '.';
+  } else if (pushedToday) {
     dataLine = 'Data from your PC as of ' + clockTime_(pushed, tz) + '.';
   } else {
     dataLine = 'No data from your PC today.';

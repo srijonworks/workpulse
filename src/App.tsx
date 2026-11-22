@@ -122,6 +122,7 @@ const safeGet = (key: string): string | null => {
 };
 import { writeHeartbeat } from './utils/heartbeat';
 import { desktopBridge } from './utils/desktopBridge';
+import { sheetSendState } from './utils/sheetSendState';
 import { recordRepairs, repairData } from './utils/dataDoctor';
 import { saveSafetyCopy, useDiskCopy, useDiskCopyState } from './hooks/useDiskCopy';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
@@ -1598,6 +1599,23 @@ export default function App() {
       }
     });
   }, [dataLoaded]);
+  // Windows shutdown: the shell holds it while the Sheet is behind, asks for one last push, then lets Windows go on.
+  const phonePending = phone.pending;
+  const phonePushNow = phone.pushNow;
+  useEffect(() => {
+    desktopBridge()?.setSheetPending(phonePending);
+  }, [phonePending]);
+  useEffect(() => {
+    const bridge = desktopBridge();
+    if (!bridge || !dataLoaded) return;
+    return bridge.onFinalPush(() => {
+      Promise.resolve()
+        .then(() => getEngine().flushAll())
+        .then(() => phonePushNow())
+        .catch(() => undefined)
+        .finally(() => bridge.finalPushed());
+    });
+  }, [dataLoaded, phonePushNow]);
   const sheetBackup = useSheetBackup({
     enabled: dataLoaded,
     settings,
@@ -1838,6 +1856,8 @@ export default function App() {
           onClockIn={() => setIsClockInOpen(true)}
           onClockOut={handleClockOut}
           onResume={handleResume}
+          sheet={sheetSendState({ linked: phone.linked, clockedOut: !!todayRecord?.clockOut, pending: phone.pending, pushFailed: phone.pushFailed })}
+          onRetrySheet={() => void phone.syncNow()}
         />
         </ErrorBoundary>
       </AppHeader>

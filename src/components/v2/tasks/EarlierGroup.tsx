@@ -15,15 +15,15 @@ const MoveAll: React.FC<{ heading: string; onClick(): void }> = ({ heading, onCl
 );
 
 interface DayBlockProps {
-  /** Output of `dayHeading`: Today, Yesterday, Mon 9 Nov. */
+  /** The group's name: Overdue, Today · Sun 22 Nov, This week, Later. */
   heading: string;
   tasks: BacklogTask[];
-  /** Adds "Move all to today" (earlier days of the Plans column). */
+  /** Adds "Move all to today" (the Overdue group). */
   onMoveAll?(ids: string[]): void;
   children: React.ReactNode;
 }
 
-/** A date group inside a panel (the Plans column): the same day heading style as elsewhere, then the rows. */
+/** A date group inside a panel (the Plan screen): the same day heading style as elsewhere, then the rows. */
 export const DayBlock: React.FC<DayBlockProps> = ({ heading, tasks, onMoveAll, children }) => {
   const id = useId();
   return (

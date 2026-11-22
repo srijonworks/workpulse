@@ -32,6 +32,7 @@ import json
 import os
 import re
 import sys
+import time
 
 from playwright.sync_api import sync_playwright, expect
 
@@ -47,7 +48,7 @@ except Exception:
 SEL = {
     # top band
     "main_nav": "Main",                                   # <nav aria-label="Main">: header tabs (first), phone bottom nav (last)
-    "tabs": {"today": "Today", "tasks": "Tasks", "history": "History", "settings": "Settings"},
+    "tabs": {"today": "Do", "tasks": "Plan", "history": "History", "settings": "Settings"},
     "search": "Search",                                   # header IconButton (Ctrl+K)
     "clock_band": "Workday clock",                        # region
     "clock_in": "Clock in",
@@ -237,6 +238,7 @@ class ScriptStub:
     def __init__(self, s, version=3, inbox=None, serve_again=False, versions=None, backup_text=""):
         self.version, self.serve_again = version, serve_again
         self.versions, self.backup_text = list(versions or []), backup_text
+        self.fail_push = False  # True: pushState answers with an error, like a Sheet that cannot be reached
         self.guard = s.sheets
         self.inbox = list(inbox or [])
         self.calls, self.taken = [], set()
@@ -266,6 +268,8 @@ class ScriptStub:
         elif action == "ackInbox":
             self.taken.update(p.get("ids", []))
             res = {"status": "ok", "taken": len(p.get("ids", []))}
+        elif action == "pushState" and self.fail_push:
+            res = {"status": "error", "code": "error", "message": "The Sheet could not be reached (smoke stub)."}
         elif action == "pushState":
             res = {"status": "ok", "pushedAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
                    "deviceChanged": False}
@@ -341,7 +345,7 @@ class Session:
     def tab(self, name):
         """Header tabs on a wide screen, the bottom nav on a phone (both are nav "Main")."""
         navs = self.page.get_by_role("navigation", name=SEL["main_nav"])
-        # the tab names carry counts ("Today , 3:15 logged", "Tasks , 5 open")
+        # the tab names carry counts ("Do , 3:15 logged", "Plan , 5 open")
         pattern = re.compile(rf"^{re.escape(SEL['tabs'][name])}\b")
         for i in range(navs.count()):
             nav = navs.nth(i)
@@ -711,7 +715,7 @@ def task_every_stage(s):
 
 @check("tasks_screen_add")
 def tasks_screen_add(s):
-    """The Tasks screen adds a task with a project and a due date; it lands under Upcoming."""
+    """The Plan screen adds a task with a project and a due date; it lands under This week, in Open only."""
     p = s.page
     s.tab("tasks")
     form = p.get_by_role("form", name="Add a task")
@@ -723,11 +727,16 @@ def tasks_screen_add(s):
     p.wait_for_timeout(300)
     task = next((t for t in s.ls("workpulse_backlog") if t["title"] == "Smoke future task"), None)
     assert task and task.get("dueDate") == due, f"task not saved with its due date: {task}"
-    # A not-started task lives in the Plans column, under its own day; the started-work column never lists it.
-    plans = p.get_by_role("region", name=re.compile(r"^Plans"))
-    expect(plans.get_by_text("Smoke future task", exact=True)).to_be_visible()
-    for left in ("Today", "Upcoming", "Done recently"):
-        expect(p.get_by_role("region", name=re.compile(rf"^{left}")).get_by_text("Smoke future task", exact=True)).to_have_count(0)
+    # A pending task is in exactly one date group (due in 2 days: This week); never under Today.
+    open_list = p.get_by_role("region", name=re.compile(r"^Open tasks"))
+    week = open_list.get_by_role("group", name=re.compile(r"^This week"))
+    expect(week.get_by_text("Smoke future task", exact=True)).to_be_visible()
+    expect(open_list.get_by_role("group", name=re.compile(r"^Today")).get_by_text("Smoke future task", exact=True)).to_have_count(0)
+    # The Done view lists only finished tasks.
+    btn(p.get_by_role("group", name="Show"), re.compile(r"^Done")).click()
+    expect(p.get_by_role("region", name=re.compile(r"^Done"))).to_be_visible()
+    expect(p.locator("main").get_by_text("Smoke future task", exact=True)).to_have_count(0)
+    btn(p.get_by_role("group", name="Show"), re.compile(r"^Open")).click()
     s.no_errors()
 
 
@@ -1870,8 +1879,11 @@ def task_dates_move_to_today(s):
     old, yest, soon = "Smoke old report", "Smoke review invoices", "Smoke tomorrow prep"
     _seed_tasks(s, ("old", old, -3, {}), ("yest", yest, -1, {}), ("soon", soon, 1, {}))
     s.tab("tasks")
-    expect(p.get_by_role("heading", name=re.compile(r"^Yesterday"))).to_be_visible()
-    expect(p.get_by_role("region", name=re.compile(r"^Plans")).get_by_text(soon, exact=True)).to_be_visible()
+    open_list = p.get_by_role("region", name=re.compile(r"^Open tasks"))
+    overdue = open_list.get_by_role("group", name=re.compile(r"^Overdue"))
+    expect(overdue.get_by_text(yest, exact=True)).to_be_visible()
+    expect(task_row(p, yest)).to_contain_text("due Yesterday")
+    expect(open_list.get_by_role("group", name=re.compile(r"^Tomorrow")).get_by_text(soon, exact=True)).to_be_visible()
     assert p.locator("main").get_by_text(old, exact=True).count() == 1, "the old task is not listed under its date"
     # something saves the backlog, then a reload: nothing moved to today by itself
     form = p.get_by_role("form", name="Add a task")
@@ -1881,24 +1893,24 @@ def task_dates_move_to_today(s):
     s.reload()
     assert [_due(s, old), _due(s, yest), _due(s, soon)] == [s.day(-3), s.day(-1), s.day(1)], "a task lost its own date"
     s.tab("tasks")
-    # one group: Move all to today, then Undo
-    btn(p, re.compile(r"^Move all to today from Yesterday")).click()
+    # the Overdue group: Move all to today, then Undo
+    btn(p, re.compile(r"^Move all to today from Overdue")).click()
     p.wait_for_timeout(400)
-    assert _due(s, yest) == s.day(0) and _due(s, old) == s.day(-3), "Move all moved the wrong tasks"
+    assert [_due(s, old), _due(s, yest), _due(s, soon)] == [s.day(0), s.day(0), s.day(1)], "Move all moved the wrong tasks"
     btn(p.get_by_role("region", name="Notifications"), "Undo", exact=True).click()
     p.wait_for_timeout(400)
-    assert _due(s, yest) == s.day(-1), "Undo did not bring the date back"
+    assert [_due(s, old), _due(s, yest)] == [s.day(-3), s.day(-1)], "Undo did not bring the dates back"
     # one row: the row menu
     row_menu(p, task_row(p, old), SEL["menu_move_today"])
-    assert _due(s, old) == s.day(0), "Move to today did not change the date"
+    assert _due(s, old) == s.day(0) and _due(s, yest) == s.day(-1), "Move to today changed the wrong date"
     expect(task_row(p, old)).to_be_visible()
     s.no_errors()
 
 
 @check("task_states_today_and_tasks")
 def task_states_today_and_tasks(s):
-    """Today groups tasks by state (paused and blocked of any date, up next = planned today, a line for older plans);
-    the Tasks page keeps not-started tasks in Plans and started ones in the left column, never in both."""
+    """Do groups tasks by state (paused and blocked of any date, up next = planned today, a line for older plans);
+    the Plan page lists every pending task once, in its date group, whatever its stage."""
     p = s.page
     _seed_tasks(s, ("paused", "Smoke paused old", -1, {"stage": "paused", "elapsedSeconds": 600}),
                 ("blocked", "Smoke blocked old", -2, {"stage": "blocked", "blockReason": "waiting on a vendor key"}),
@@ -1912,14 +1924,15 @@ def task_states_today_and_tasks(s):
     expect(task_row(p, "Smoke blocked old")).to_contain_text("waiting on a vendor key")
     expect(card.get_by_role("group", name=re.compile(r"^Up next")).get_by_text("Smoke up next", exact=True)).to_be_visible()
     assert card.get_by_text("Smoke plan yesterday", exact=True).count() == 0, "an older plan is listed on Today"
-    # the older plans are one line that opens the Tasks page
-    btn(card, re.compile(r"^2 more plans from earlier days")).click()
-    expect(p.get_by_role("region", name=re.compile(r"^Plans"))).to_be_visible()   # now on the Tasks page
-    plans = p.get_by_role("region", name=re.compile(r"^Plans"))
-    for title in ("Smoke up next", "Smoke plan yesterday", "Smoke plan older"):
-        expect(plans.get_by_text(title, exact=True)).to_have_count(1)
-    for title in ("Smoke paused old", "Smoke blocked old"):
-        expect(plans.get_by_text(title, exact=True)).to_have_count(0)
+    # the older plans are one line that opens the Plan page
+    btn(card, re.compile(r"^2 more overdue tasks on Plan")).click()
+    open_list = p.get_by_role("region", name=re.compile(r"^Open tasks"))
+    expect(open_list).to_be_visible()   # now on the Plan page
+    overdue = open_list.get_by_role("group", name=re.compile(r"^Overdue"))
+    for title in ("Smoke plan yesterday", "Smoke plan older", "Smoke paused old", "Smoke blocked old"):
+        expect(overdue.get_by_text(title, exact=True)).to_have_count(1)
+    expect(open_list.get_by_role("group", name=re.compile(r"^Today")).get_by_text("Smoke up next", exact=True)).to_have_count(1)
+    for title in ("Smoke up next", "Smoke plan yesterday", "Smoke paused old", "Smoke blocked old"):
         assert p.locator("main").get_by_text(title, exact=True).count() == 1, f"{title} is not in exactly one place"
     s.no_errors()
 
@@ -2078,6 +2091,68 @@ def phone_email_settings(s):
     btn(sec, SEL["email_test"], exact=True).click()
     expect(sec).to_contain_text("Test email sent to owner@gmail.com.", timeout=5000)
     s.no_overflow("Settings")
+    s.no_errors()
+
+
+@check("email_sheet_sends")
+def email_sheet_sends(s):
+    """Script version 8: "when I clock out" asks the Sheet to send the email itself (when=clockout, enabled) and hands it
+    this computer's Gemini key; the version-7 warning is not shown."""
+    p = s.page
+    stub = ScriptStub(s, version=8)
+    settings = s.ls("workpulse_settings") or dict(SEED_SETTINGS, theme="chase")
+    settings.update(googleScriptUrl=SCRIPT_URL, phoneToken=PHONE_TOKEN, geminiApiKey="AIzaSmokeKey_1234567890",
+                    emailEnabled=True, emailWhen="clockout")
+    s.set_ls("workpulse_settings", settings)
+    s.reload()
+    s.settings_section("Phone & evening email")
+    sec = p.locator(SEL["phone_section"])
+    sec.scroll_into_view_if_needed()
+    expect(sec.get_by_role("radio", name=re.compile(r"When I clock out"))).to_be_checked(timeout=5000)
+    expect(sec).not_to_contain_text("so this email is sent from your PC")
+    btn(sec, SEL["email_save"], exact=True).click()
+    expect(sec).to_contain_text("Your Sheet sends it 10 to 25 minutes after you clock out", timeout=5000)
+    mail = stub.payloads("setEmail")[-1]
+    assert (mail["enabled"], mail.get("when"), mail.get("geminiKey")) == (True, "clockout", "AIzaSmokeKey_1234567890"), \
+        f"unexpected setEmail request {mail}"
+    s.no_errors()
+
+
+@check("clockout_sheet_sign")
+def clockout_sheet_sign(s):
+    """A clock-out goes to the Sheet at once (no 5 s wait) and the band says "Sent to your Sheet"; a failed push says
+    "Not sent to your Sheet yet" with Send again, which sends it."""
+    p = s.page
+    stub = ScriptStub(s, version=8)
+    settings = s.ls("workpulse_settings") or dict(SEED_SETTINGS, theme="chase")
+    settings.update(googleScriptUrl=SCRIPT_URL, phoneToken=PHONE_TOKEN)
+    s.set_ls("workpulse_settings", settings)
+    s.reload()
+    band = p.get_by_role("region", name=SEL["clock_band"])
+    s.clock_in_now()
+    p.wait_for_timeout(6000)  # the clock-in's own push (after the usual 5 s)
+
+    def pushed_clock_out():
+        return [x for x in stub.payloads("pushState") if (x.get("workdays") or {}).get(s.today(), {}).get("clockOut")]
+
+    btn(band, SEL["clock_out"], exact=True).click()
+    started = time.time()
+    while not pushed_clock_out() and time.time() - started < 4:
+        p.wait_for_timeout(100)
+    took = time.time() - started
+    assert pushed_clock_out(), "the clock-out was not pushed to the Sheet"
+    assert took < 3, f"the clock-out reached the Sheet after {took:.1f} s; it should go at once"
+    expect(band.get_by_role("status")).to_contain_text("Sent to your Sheet", timeout=3000)
+
+    stub.fail_push = True
+    btn(band, SEL["resume_day"], exact=True).click()
+    p.wait_for_timeout(300)
+    btn(band, SEL["clock_out"], exact=True).click()
+    expect(band.get_by_role("status")).to_contain_text("Not sent to your Sheet yet", timeout=5000)
+    stub.fail_push = False
+    btn(band, "Send again", exact=True).click()
+    expect(band.get_by_role("status")).to_contain_text("Sent to your Sheet", timeout=5000)
+    expect(btn(band, "Send again", exact=True)).to_have_count(0)
     s.no_errors()
 
 

@@ -209,6 +209,8 @@ input[type='radio'] {
   --band-line: rgb(255 255 255 / 0.1);
   --band-edge: 1px solid var(--band-line);
   --band-focus: #f2b705;
+  /* Small warning text on the band (red fails on this green; the yellow passes AA). */
+  --band-alert: #f2b705;
   --clock-calm: #f2b705;
   --clock-near: #ffb347;
   --clock-due: #ff8a3d;
@@ -268,6 +270,7 @@ input[type='radio'] {
   --band-line: #c9bc9c;
   --band-edge: 2px solid #1c1a17;
   --band-focus: #1c1a17;
+  --band-alert: var(--danger);
   --clock-calm: #1c1a17;
   --clock-near: #9a5b00;
   --clock-due: #c4302b;
@@ -326,6 +329,7 @@ input[type='radio'] {
   --band-line: #2c3038;
   --band-edge: 1px solid #2c3038;
   --band-focus: #7cc4a4;
+  --band-alert: var(--danger);
   --clock-calm: #7cc4a4;
   --clock-near: #e5a84b;
   --clock-due: #f08a4b;
@@ -379,6 +383,7 @@ input[type='radio'] {
   --band-line: #323b3e;
   --band-edge: 1px solid #323b3e;
   --band-focus: #f0b45a;
+  --band-alert: var(--danger);
   --clock-calm: #a2b0b3;
   --clock-near: #f0b45a;
   --clock-due: #e59a63;

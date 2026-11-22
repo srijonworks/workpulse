@@ -4,6 +4,7 @@ import { clockState, formatClock, formatHm, formatHms, type ClockState } from '.
 import { buildOvers, workBuckets } from '../../utils/segments';
 import { localTimeStr, parseLocalDate } from '../../utils/dates';
 import type { ThemeId } from '../../utils/theme';
+import type { SheetSendState } from '../../utils/sheetSendState';
 import { OversStrip } from './OversStrip';
 import { useNow } from './useNow';
 
@@ -22,7 +23,17 @@ interface ClockBandProps {
   onClockIn(): void;
   onClockOut(date: string): void;
   onResume(date: string): void;
+  /** After a clock-out: whether the Google Sheet has the day (it sends the email from it). Absent = no Sheet linked. */
+  sheet?: SheetSendState | null;
+  /** Pushes to the Sheet again now (shown when the last push failed). */
+  onRetrySheet?(): void;
 }
+
+const SHEET_TEXT: Record<SheetSendState, string> = {
+  sent: 'Sent to your Sheet',
+  sending: 'Sending to your Sheet…',
+  failed: 'Not sent to your Sheet yet. Keep the PC on.',
+};
 
 const hhmm = (ms: number) => localTimeStr(new Date(ms));
 
@@ -92,6 +103,8 @@ export const ClockBand: React.FC<ClockBandProps> = ({
   onClockIn,
   onClockOut,
   onResume,
+  sheet,
+  onRetrySheet,
 }) => {
   const now = useNow(1000);
   const s = clockState(record, hours, now);
@@ -137,9 +150,26 @@ export const ClockBand: React.FC<ClockBandProps> = ({
           <span className="text-[var(--band-muted)]"> · </span>
           worked <span className="num">{formatHm(s.workedSec)}</span>
         </p>
-        <BandButton theme={theme} onClick={() => onResume(today)} className="ml-auto">
-          Resume
-        </BandButton>
+        {sheet && (
+          <p
+            role="status"
+            data-sheet={sheet}
+            className={`${SMALL} font-semibold ${sheet === 'failed' ? 'text-[var(--band-alert)]' : 'text-[var(--band-muted)]'}`}
+          >
+            {sheet === 'sent' && <span aria-hidden="true">✓ </span>}
+            {SHEET_TEXT[sheet]}
+          </p>
+        )}
+        <div className="flex flex-wrap gap-2 ml-auto">
+          {sheet === 'failed' && onRetrySheet && (
+            <BandButton theme={theme} tone="out" onClick={onRetrySheet}>
+              Send again
+            </BandButton>
+          )}
+          <BandButton theme={theme} onClick={() => onResume(today)}>
+            Resume
+          </BandButton>
+        </div>
       </div>
     );
   } else {

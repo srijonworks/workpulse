@@ -78,6 +78,23 @@ export async function pullAndMerge(deps: PullDeps): Promise<{ added: BacklogTask
   return { added: merged.added };
 }
 
+/** Waits before the quick retries after a failed push (10 s, 10 s, 20 s, 40 s); after them the minute cycle goes on. */
+export const PUSH_RETRY_MS = [10_000, 10_000, 20_000, 40_000];
+
+/** The wait before retry number `failures` (1 = after the first failure), or null when the quick retries are used up. */
+export function pushRetryDelay(failures: number): number | null {
+  return failures >= 1 && failures <= PUSH_RETRY_MS.length ? PUSH_RETRY_MS[failures - 1] : null;
+}
+
+/**
+ * True when `next` has a clock-out that `prev` did not have (or a different one): the Sheet must hear of it at once, because
+ * it sends the day's email from it and the PC may be shut down right after. `prev` null (first look) is never new.
+ */
+export function newClockOut(prev: Workdays | null, next: Workdays): boolean {
+  if (!prev) return false;
+  return Object.keys(next).some((d) => !!next[d]?.clockOut && next[d].clockOut !== prev[d]?.clockOut);
+}
+
 /** What Settings shows: a failing push wins (the phone's view is getting old), else a failing pull. */
 export function combinedError(e: { push?: string; pull?: string }): string | undefined {
   return e.push ?? e.pull;
@@ -125,6 +142,14 @@ const snapshotOf = (a: PhoneSyncArgs, deviceId: string) =>
 export function usePhoneSync(args: PhoneSyncArgs): {
   syncNow(): Promise<void>;
   pullNow(): Promise<BacklogTask[]>;
+  /** Pushes now if anything changed; true when the Sheet then has the current state (the shell's last push before shutdown). */
+  pushNow(): Promise<boolean>;
+  /** The Sheet is behind this computer (a change not pushed yet, or a push that failed). */
+  pending: boolean;
+  /** The last push failed (cleared by the next one that works). */
+  pushFailed: boolean;
+  /** A Sheet link and token are set, so this computer pushes to the Sheet. */
+  linked: boolean;
   status: PhoneSyncStatus;
 } {
   const latest = useRef(args);
@@ -139,6 +164,12 @@ export function usePhoneSync(args: PhoneSyncArgs): {
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const inFlight = useRef(0);
   const lastSig = useRef<string | null>(null);
+  // The same as lastSig, as state, so `pending` follows a push.
+  const [pushedSig, setPushedSig] = useState<string | null>(null);
+  const [pushFailed, setPushFailed] = useState(false);
+  const failures = useRef(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pushRef = useRef<() => Promise<void>>(async () => undefined);
   const lastPushAt = useRef<number | null>(null);
   const lastPullAt = useRef(0);
   const errors = useRef<{ push?: string; pull?: string }>({});
@@ -212,17 +243,34 @@ export function usePhoneSync(args: PhoneSyncArgs): {
         const running = a.backlog.some(isRunningTask);
         if (!shouldPush({ signature: sig, lastSignature: lastSig.current, lastPushAtMs: lastPushAt.current, nowMs, running })) return;
         const r = await pushState(s.googleScriptUrl, s.phoneToken as string, snap);
+        if (retryTimer.current) clearTimeout(retryTimer.current);
+        retryTimer.current = null;
         if (r.ok) {
           lastSig.current = sig;
+          setPushedSig(sig);
           lastPushAt.current = nowMs;
+          failures.current = 0;
+          setPushFailed(false);
           setDeviceChanged((r.data as { deviceChanged?: unknown } | undefined)?.deviceChanged === true);
           record({ phoneSyncAt: new Date(nowMs).toISOString() });
           setError('push', undefined);
         } else {
+          setPushFailed(true);
           setError('push', r.message);
+          // Try again soon (a clock-out must reach the Sheet before the PC goes off), then fall back to the minute cycle.
+          failures.current += 1;
+          const wait = pushRetryDelay(failures.current);
+          if (wait !== null) retryTimer.current = setTimeout(() => void pushRef.current(), wait);
         }
       }),
     [run, record, setError],
+  );
+  pushRef.current = push;
+  useEffect(
+    () => () => {
+      if (retryTimer.current) clearTimeout(retryTimer.current);
+    },
+    [],
   );
 
   const pull = useCallback(
@@ -257,9 +305,23 @@ export function usePhoneSync(args: PhoneSyncArgs): {
   // A new script or token: push the full state again.
   useEffect(() => {
     lastSig.current = null;
+    setPushedSig(null);
+    setPushFailed(false);
+    failures.current = 0;
     lastPushAt.current = null;
     errors.current = {};
   }, [url, token]);
+
+  // A new clock-out goes to the Sheet at once, not after the usual few seconds: the Sheet sends the day's email from it.
+  const seenWorkdays = useRef<Workdays | null>(null);
+  useEffect(() => {
+    if (!active) {
+      seenWorkdays.current = null;
+      return;
+    }
+    if (newClockOut(seenWorkdays.current, args.workdays)) void push();
+    seenWorkdays.current = args.workdays;
+  }, [active, args.workdays, push]);
 
   // Pull once at load (or when the link is first set up).
   useEffect(() => {
@@ -300,9 +362,21 @@ export function usePhoneSync(args: PhoneSyncArgs): {
     await pull();
   }, [push, pull]);
 
+  const pushNow = useCallback(async () => {
+    const s = latest.current.settings;
+    if (!latest.current.enabled || !s.googleScriptUrl || !s.phoneToken) return true;
+    await push();
+    const a = latest.current;
+    return snapshotSignature(snapshotOf(a, '')) === lastSig.current;
+  }, [push]);
+
   return {
     syncNow,
     pullNow: pull,
+    pushNow,
+    pending: active && signature !== pushedSig,
+    pushFailed: active && pushFailed,
+    linked: active,
     status: { lastPushAt: settings.phoneSyncAt, lastError: settings.phoneLastError, busy, deviceChanged },
   };
 }

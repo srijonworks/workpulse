@@ -18,7 +18,7 @@ You need the Google Sheet you already sync logs to, with its script. A phone and
 4. Google asks for permission again. Allow all of it: the Sheet, sending email to you, and running timers (the daily one and
    the one-off ones that send a standup email later).
    (If a screen says the app is not verified, choose Advanced and continue; it is your own script.)
-5. Back in WorkPulse, **Settings > Phone & evening email**. The section should say the script is version 7.
+5. Back in WorkPulse, **Settings > Phone & evening email**. The section should say the script is version 8.
    If it says an older version, the paste or the new version in step 3 did not take; repeat them.
 6. Press **Set PIN** and type a 4-digit PIN twice. WorkPulse keeps only a token for this computer, never the PIN.
 7. Choose the time for the evening email (from 00:30 to 23:29), tick **Send me an evening email**, press **Save**, then
@@ -40,6 +40,32 @@ Notes:
   `WorkPulse_Projects`, from version 4 `WorkPulse_Backup`, and from version 6 `WorkPulse_DayHistory` and `WorkPulse_Standups`).
   `WorkPulse_Logs` keeps its columns and gains an `Origin` column at the end (version 6; `auto` for a log WorkPulse wrote itself).
   Do not edit the new tabs; WorkPulse rewrites them.
+
+## Updating to script version 8
+
+Version 8 makes the email sent **when you clock out** come from the Sheet itself, so it still arrives when you shut the PC
+down right after clocking out.
+
+- **How it works:** a timer in the Sheet runs every 15 minutes. WorkPulse sends your clock-out and the day's logs to the
+  Sheet about 5 seconds after you clock out. Once the clock-out has reached the Sheet, the timer sends the day's email:
+  - at once, if your PC's standup has arrived;
+  - otherwise 10 minutes after the clock-out, with a standup the Sheet writes itself.
+  So the email arrives 10 to 25 minutes after you clock out.
+- **Forgotten clock-out:** a day you never clocked out of is sent just after midnight.
+- **Thursdays:** the week standup (Friday to Thursday) is sent the same way.
+- **Gemini:** the Sheet writes the standup with your Gemini key (from **Settings > AI**, sent when you press
+  **Save email settings**). It keeps the key in the script's own settings and never sends it back.
+- **When Gemini fails:** a rate limit, a server error, a refused key or a missing permission only means the standup is
+  written in plain wording from your logs. The email is never held back.
+- **No doubles:** each day and week is sent at most once, whether the PC or the Sheet sends it first.
+- **Only from today:** days before you switched this on are never sent.
+
+1. Copy the new script, paste it and update the **existing** deployment (steps 1 to 3 below).
+2. Allow the new permission Google asks for (**connect to an external service**, used for Gemini). If your
+   `appsScript.json` lists scopes, add the line shown in **Google says a permission is missing?** in Settings.
+3. In WorkPulse, **Settings > Phone & evening email**: check it says version 8, choose **When I clock out**, and press
+   **Save email settings**. This step creates the Sheet's timer; until you press it, nothing changes.
+4. To change the Gemini key later, change it in **Settings > AI**, then press **Save email settings** again.
 
 ## Updating to script version 7
 
@@ -87,8 +113,8 @@ cleared browser or a dead computer does not lose it.
 
 The automated tests use fakes for Google. Do these once against the real Sheet, and tick them off.
 
-1. **Version.** WorkPulse Settings > Phone & evening email says script version 7 (or open the `/exec` link with
-   `?action=ping`; it answers `"version":7`).
+1. **Version.** WorkPulse Settings > Phone & evening email says script version 8 (or open the `/exec` link with
+   `?action=ping`; it answers `"version":8`).
 2. **Same URL.** After step 3 above the link in WorkPulse still works with no change. (Editing the existing
    deployment keeps the URL; **New deployment** would not.)
 3. **Phone page opens.** `<your /exec link>?page=phone` shows the PIN keypad. A wrong PIN says so and counts the

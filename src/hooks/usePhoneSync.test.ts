@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { BacklogTask, Project } from '../types';
 import { mergeInbox, type InboxItem } from '../utils/phoneSync';
-import { shouldPush, pullAndMerge, combinedError, RUNNING_PUSH_MS } from './usePhoneSync';
+import { shouldPush, pullAndMerge, combinedError, newClockOut, pushRetryDelay, RUNNING_PUSH_MS } from './usePhoneSync';
 
 process.env.TZ = 'Asia/Dhaka';
 
@@ -138,5 +138,28 @@ describe('combinedError', () => {
   });
   it('nothing when both work', () => {
     expect(combinedError({})).toBeUndefined();
+  });
+});
+
+describe('newClockOut', () => {
+  const open = { '2026-11-19': { clockIn: '2026-11-19T02:40:00.000Z' } };
+  const closed = { '2026-11-19': { clockIn: '2026-11-19T02:40:00.000Z', clockOut: '2026-11-19T10:19:00.000Z' } };
+  it('is true when a clock-out appears or changes, so the Sheet hears of it at once', () => {
+    expect(newClockOut(open, closed)).toBe(true);
+    expect(newClockOut(closed, { '2026-11-19': { ...closed['2026-11-19'], clockOut: '2026-11-19T11:00:00.000Z' } })).toBe(true);
+  });
+  it('is false on the first look, with no change, on a clock-in or on a Resume', () => {
+    expect(newClockOut(null, closed)).toBe(false);
+    expect(newClockOut(closed, { ...closed })).toBe(false);
+    expect(newClockOut({}, open)).toBe(false);
+    expect(newClockOut(closed, open)).toBe(false);
+  });
+});
+
+describe('pushRetryDelay', () => {
+  it('retries a failed push after 10 s, 10 s, 20 s and 40 s, then leaves it to the minute cycle', () => {
+    expect([1, 2, 3, 4].map(pushRetryDelay)).toEqual([10_000, 10_000, 20_000, 40_000]);
+    expect(pushRetryDelay(5)).toBeNull();
+    expect(pushRetryDelay(0)).toBeNull();
   });
 });

@@ -106,10 +106,17 @@ export function ackInbox(url: string, token: string, ids: string[]): Promise<Pho
   return call(url, 'ackInbox', { token, ids }, 'Inbox cleared.');
 }
 
+/** The first script version that sends "when I clock out" emails by itself (a timer in the Sheet), with its own Gemini call. */
+export const SHEET_SENDS_SCRIPT_VERSION = 8;
+
+/**
+ * `when` and `geminiKey` need script version 8 (an older script ignores them, so only send them to version 8).
+ * geminiKey: a text saves it in the script ('' removes it); left out keeps the saved one.
+ */
 export function setEmailSchedule(
   url: string,
   token: string,
-  cfg: { enabled: boolean; hour: number; minute: number; tz: string; to?: string },
+  cfg: { enabled: boolean; hour: number; minute: number; tz: string; to?: string; when?: 'clockout' | 'fixed'; geminiKey?: string },
 ): Promise<PhoneApiResult> {
   return call(url, 'setEmail', { token, ...cfg }, cfg.enabled ? 'Evening email is on.' : 'Evening email is off.');
 }

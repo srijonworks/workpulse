@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Check, Copy, ExternalLink, Loader2 } from 'lucide-react';
 import type { AppSettings } from '../../../types';
 import type { PhoneSyncStatus } from '../../../hooks/usePhoneSync';
-import { getScriptVersion, resetPhoneAccess, sendTestEmail, setEmailSchedule, setPhonePin } from '../../../utils/phoneApi';
+import { SHEET_SENDS_SCRIPT_VERSION, getScriptVersion, resetPhoneAccess, sendTestEmail, setEmailSchedule, setPhonePin } from '../../../utils/phoneApi';
 import { APPS_SCRIPT_SCOPES_SNIPPET } from '../../../utils/googleAppsScriptTemplate';
 import { emailWhenOf, type EmailWhen } from '../../../utils/emailWhen';
 import { DEFAULT_EMAIL_TIME, cleanRecipients, emailTimeAllowed, parseEmailTime, phoneLink } from '../../../utils/phoneSettings';
@@ -235,8 +235,17 @@ export const PhoneEmailSection: React.FC<PhoneEmailSectionProps> = ({ settings, 
     const time = t ?? parseEmailTime(DEFAULT_EMAIL_TIME)!;
     setEmailBusy('save');
     setEmailResult(null);
-    // "When I clock out" needs no daily timer in the Sheet (the standup email is sent from the app); only a fixed time does.
-    const r = await setEmailSchedule(url, token, { enabled: emailOn && fixed, hour: time.hour, minute: time.minute, tz: zone(), to });
+    // From script version 8 the Sheet sends "when I clock out" emails itself (a timer every 15 minutes), so a PC shut down at
+    // once still gets its email; it gets the Gemini key from Settings -> AI to write the standup when the PC's is not there.
+    // An older script only knows the fixed time: "when I clock out" then sends no timer and the app sends the email.
+    const sheetSends = typeof version === 'number' && version >= SHEET_SENDS_SCRIPT_VERSION;
+    const r = await setEmailSchedule(
+      url,
+      token,
+      sheetSends
+        ? { enabled: emailOn, when: emailWhen, hour: time.hour, minute: time.minute, tz: zone(), to, geminiKey: settings.geminiApiKey?.trim() ?? '' }
+        : { enabled: emailOn && fixed, hour: time.hour, minute: time.minute, tz: zone(), to },
+    );
     setEmailBusy(null);
     if (!r.ok) {
       setEmailResult({ ok: false, message: r.message });
@@ -251,7 +260,13 @@ export const PhoneEmailSection: React.FC<PhoneEmailSectionProps> = ({ settings, 
         ? 'The daily email is off.'
         : fixed
           ? `The daily email is on. It arrives around ${hhmm} on days with a log or a clock-in.`
-          : 'The daily email is on. It arrives a few minutes after you clock out. A day you forget is closed for you, and the email follows.',
+          : sheetSends
+            ? `The daily email is on. Your Sheet sends it 10 to 25 minutes after you clock out, even if your PC is off by then (a day you forget to close goes just after midnight). ${
+                settings.geminiApiKey?.trim()
+                  ? 'If your PC has not sent its standup, the Sheet writes one with your Gemini key, or in plain wording when Gemini fails.'
+                  : 'If your PC has not sent its standup, the Sheet writes one in plain wording (add a Gemini key in Settings > AI and save here again to let it use Gemini).'
+              }`
+            : 'The daily email is on. It arrives a few minutes after you clock out. A day you forget is closed for you, and the email follows.',
     });
   };
 
@@ -529,6 +544,13 @@ export const PhoneEmailSection: React.FC<PhoneEmailSectionProps> = ({ settings, 
                     itself (when you have been idle for an hour after your hours are done, or just after midnight at the latest)
                     and sends it then.
                   </span>
+                  {typeof version === 'number' && version < SHEET_SENDS_SCRIPT_VERSION && emailWhen === 'clockout' && (
+                    <span role="alert" className="block mt-1 text-[length:var(--fs-small)] text-danger">
+                      Your Sheet script is version {version}, so this email is sent from your PC and does not go out when the PC is shut
+                      down right after clocking out. Re-paste the latest script (version {SHEET_SENDS_SCRIPT_VERSION}), update your existing
+                      deployment, then press Save email settings so your Sheet sends it.
+                    </span>
+                  )}
                 </span>
               </label>
               <label className="flex items-start gap-2.5 min-h-11 text-[length:var(--fs-body)] text-[var(--text-main)] cursor-pointer">

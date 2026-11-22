@@ -24,4 +24,8 @@ contextBridge.exposeInMainWorld('workpulseDesktop', {
   // the shell asks the page to save everything before quit, sleep, lock or sign-out; the page answers when done
   onFlush: (cb) => listen('wp:flush', cb),
   flushed: () => ipcRenderer.send('wp:flushed'),
+  // the last push to the Google Sheet before Windows shuts down (the Sheet sends the day's email from it)
+  setSheetPending: (pending) => ipcRenderer.send('wp:sheet-pending', pending === true),
+  onFinalPush: (cb) => listen('wp:final-push', cb),
+  finalPushed: () => ipcRenderer.send('wp:final-pushed'),
 });

@@ -23,7 +23,7 @@ export interface TodayTasksProps {
   onMoveToToday(ids: string[]): void;
   /** Opens Plan your day (earlier tasks to carry, new tasks for today). */
   onPlanDay(): void;
-  /** Switches to the Tasks page (the Plans list holds the not-started tasks of earlier days). */
+  /** Switches to the Plan page (its Overdue group holds the not-started tasks of earlier days). */
   onOpenTasks(): void;
   /** The project last used from the quick inputs (the selector's starting point). */
   lastProjectId?: string;
@@ -93,7 +93,7 @@ export const TodayTasks: React.FC<TodayTasksProps> = ({ backlog, projects, today
           onClick={onOpenTasks}
           className="min-h-8 pointer-coarse:min-h-11 px-1 text-[length:var(--fs-small)] font-semibold text-[var(--accent-text)] underline underline-offset-4 cursor-pointer"
         >
-          {g.earlierPlans} more {g.earlierPlans === 1 ? 'plan' : 'plans'} from earlier {g.earlierPlans === 1 ? 'day' : 'days'}
+          {g.earlierPlans} more overdue {g.earlierPlans === 1 ? 'task' : 'tasks'} on Plan
         </button>
       </div>
     ) : null;

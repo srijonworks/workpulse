@@ -11,7 +11,7 @@ export const SCRIPT_CORE = String.raw`
 // Phone page, phone inbox and desktop state (version 3 and later)
 // =========================================================================
 
-var SCRIPT_VERSION = 7;
+var SCRIPT_VERSION = 8;
 var MAX_PIN_TRIES = 5;
 var LOCK_MINUTES = 15;
 var MAX_TITLE = 200;

@@ -28,72 +28,45 @@ describe('dayLabelLong', () => {
 });
 
 describe('groupTasks', () => {
-  it('puts only planned tasks in the Plans column: today, earlier days newest first, upcoming oldest first', () => {
+  it('puts every pending task in one date group whatever its stage', () => {
     const g = groupTasks(
       [
         task('two', { dueDate: '2026-11-08' }),
         task('y1', { dueDate: '2026-11-09' }),
         task('yb', { dueDate: '2026-11-09', stage: 'blocked', blockReason: 'vendor key' }),
         task('fresh'),
-        task('tom2', { dueDate: '2026-11-12' }),
+        task('pToday', { stage: 'paused' }),
         task('tom', { dueDate: '2026-11-11' }),
+        task('wk2', { dueDate: '2026-11-16' }), // today + 6: last day of "this week"
+        task('wk1', { dueDate: '2026-11-12', stage: 'paused' }),
+        task('far', { dueDate: '2026-11-17' }), // today + 7: later
         task('rolled', { dueDate: '2026-11-10', isRolledOver: true, originalDate: '2026-11-08' }),
       ],
       today,
     );
-    expect(ids(g.plans.today)).toEqual(['fresh', 'rolled']);
-    expect(g.plans.earlier.map((d) => [d.date, ids(d.tasks)])).toEqual([
-      ['2026-11-09', ['y1']],
-      ['2026-11-08', ['two']],
-    ]);
-    expect(g.plans.upcoming.map((d) => [d.date, ids(d.tasks)])).toEqual([
-      ['2026-11-11', ['tom']],
-      ['2026-11-12', ['tom2']],
-    ]);
-    // The blocked task is started work: left column, under its own date. Nothing is in both columns.
-    expect(g.earlier.map((d) => [d.date, ids(d.tasks)])).toEqual([['2026-11-09', ['yb']]]);
-    expect(g.today).toEqual([]);
-    expect(g.upcoming).toEqual([]);
-    expect(g.doneRecently).toEqual([]);
+    // Overdue: newest date first, started before planned within a date.
+    expect(ids(g.overdue)).toEqual(['yb', 'y1', 'two']);
+    expect(ids(g.today)).toEqual(['pToday', 'fresh', 'rolled']);
+    expect(ids(g.tomorrow)).toEqual(['tom']);
+    expect(ids(g.thisWeek)).toEqual(['wk1', 'wk2']);
+    expect(ids(g.later)).toEqual(['far']);
+    expect(g.done).toEqual([]);
   });
 
-  it('keeps paused and blocked tasks under their own date, earlier days newest first, later days oldest first', () => {
-    const g = groupTasks(
-      [
-        task('p8', { dueDate: '2026-11-08', stage: 'paused' }),
-        task('b9', { dueDate: '2026-11-09', stage: 'blocked' }),
-        task('p9', { dueDate: '2026-11-09', stage: 'paused' }),
-        task('pToday', { stage: 'paused' }),
-        task('pLater2', { dueDate: '2026-11-13', stage: 'paused' }),
-        task('pLater', { dueDate: '2026-11-11', stage: 'paused' }),
-      ],
-      today,
-    );
-    expect(g.earlier.map((d) => [d.date, ids(d.tasks)])).toEqual([
-      ['2026-11-09', ['b9', 'p9']],
-      ['2026-11-08', ['p8']],
-    ]);
-    expect(ids(g.today)).toEqual(['pToday']);
-    expect(g.upcoming.map((d) => [d.date, ids(d.tasks)])).toEqual([
-      ['2026-11-11', ['pLater']],
-      ['2026-11-13', ['pLater2']],
-    ]);
-    expect(g.plans).toEqual({ today: [], earlier: [], upcoming: [] });
-  });
-
-  it('keeps a running task under today even when it is due later, running first, and no planned task there', () => {
+  it('keeps a running task under today even when it is due another day, running first', () => {
     const g = groupTasks(
       [
         task('plan'),
         task('paused', { stage: 'paused' }),
         task('run', { stage: 'in_progress', isRunning: true }),
         task('later', { dueDate: '2026-11-12', stage: 'in_progress', isRunning: true }),
+        task('old', { dueDate: '2026-11-08', stage: 'in_progress', isRunning: true }),
       ],
       today,
     );
-    expect(ids(g.today)).toEqual(['run', 'later', 'paused']);
-    expect(g.upcoming).toEqual([]);
-    expect(ids(g.plans.today)).toEqual(['plan']);
+    expect(ids(g.today)).toEqual(['run', 'later', 'old', 'paused', 'plan']);
+    expect(g.overdue).toEqual([]);
+    expect(g.thisWeek).toEqual([]);
   });
 
   it('lists done tasks of the last 7 local days, newest first', () => {
@@ -108,12 +81,12 @@ describe('groupTasks', () => {
       ],
       today,
     );
-    expect(ids(g.doneRecently)).toEqual(['early', 'mid', 'edge']);
+    expect(ids(g.done)).toEqual(['early', 'mid', 'edge']);
   });
 
   it('falls back to the due date for a done task with no completion time', () => {
     const g = groupTasks([task('nostamp', { stage: 'done', completed: true, dueDate: '2026-11-09' })], today);
-    expect(ids(g.doneRecently)).toEqual(['nostamp']);
+    expect(ids(g.done)).toEqual(['nostamp']);
   });
 });
 
@@ -131,16 +104,15 @@ describe('filterByProject and sectionProjectIds', () => {
     expect(sectionProjectIds(groupTasks(list, today)).sort()).toEqual(['p1', 'p2', 'p3']);
   });
 
-  it('keeps only one project in both columns and drops emptied date groups', () => {
+  it('keeps only one project in every group', () => {
     const f = filterByProject(groupTasks(list, today), 'p2');
     expect(ids(f.today)).toEqual([]);
-    expect(f.plans.upcoming.map((d) => ids(d.tasks))).toEqual([['b']]);
-    expect(f.plans.earlier.map((d) => [d.date, ids(d.tasks)])).toEqual([['2026-11-09', ['f']]]);
-    expect(f.earlier.map((d) => [d.date, ids(d.tasks)])).toEqual([['2026-11-09', ['c']]]);
-    expect(f.doneRecently).toEqual([]);
+    expect(ids(f.tomorrow)).toEqual(['b']);
+    expect(ids(f.overdue)).toEqual(['c', 'f']);
+    expect(f.done).toEqual([]);
     const p3 = filterByProject(groupTasks(list, today), 'p3');
-    expect(p3.earlier).toEqual([]);
-    expect(p3.plans.earlier).toEqual([]);
+    expect(p3.overdue).toEqual([]);
+    expect(ids(p3.done)).toEqual(['d']);
     expect(filterByProject(groupTasks(list, today), null)).toEqual(groupTasks(list, today));
   });
 });

@@ -169,6 +169,8 @@ export const APPS_SCRIPT_OAUTH_SCOPES = [
   'https://www.googleapis.com/auth/script.send_mail',
   'https://www.googleapis.com/auth/script.scriptapp',
   'https://www.googleapis.com/auth/userinfo.email',
+  // UrlFetchApp: the Sheet's own Gemini call for the standup email (version 8). Without it the standup uses plain wording.
+  'https://www.googleapis.com/auth/script.external_request',
 ];
 
 export const APPS_SCRIPT_SCOPES_SNIPPET = `"oauthScopes": [\n${APPS_SCRIPT_OAUTH_SCOPES.map((s) => `    "${s}"`).join(',\n')}\n  ],`;

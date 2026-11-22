@@ -25,6 +25,11 @@ export interface DesktopBridge {
   /** The shell asks the page to save everything now (quit, sleep, lock, sign-out); call `flushed` when done. */
   onFlush(cb: () => void): () => void;
   flushed(): void;
+  /** Tells the shell whether the Sheet is behind this computer, so a Windows shutdown waits for one last push. */
+  setSheetPending(pending: boolean): void;
+  /** Windows is shutting down and the Sheet is behind: push now, then call `finalPushed` (the shell waits a few seconds at most). */
+  onFinalPush(cb: () => void): () => void;
+  finalPushed(): void;
 }
 
 export function desktopBridge(): DesktopBridge | null {

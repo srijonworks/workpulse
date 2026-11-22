@@ -351,7 +351,7 @@ describe('evening email: setEmail and sendTestEmail', () => {
     expect(r).toMatchObject({ status: 'ok', enabled: true, hour: 18, minute: 0, tz: DHAKA });
     h.call('setEmail', { token, enabled: true, hour: 19, minute: 30, tz: DHAKA });
     expect(h.triggers).toEqual([expect.objectContaining({ fn: 'sendEveningEmail', hour: 19, minute: 30, tz: DHAKA })]);
-    expect(JSON.parse(h.props.email)).toEqual({ enabled: true, hour: 19, minute: 30, tz: DHAKA });
+    expect(JSON.parse(h.props.email)).toEqual({ enabled: true, when: 'fixed', hour: 19, minute: 30, tz: DHAKA });
     expect(h.lockHeld).toBe(false);
   });
 
@@ -371,7 +371,7 @@ describe('evening email: setEmail and sendTestEmail', () => {
     const r = h.call('setEmail', { token, enabled: true, hour: 19, minute: 30, tz: DHAKA });
     expect(r).toMatchObject({ status: 'error', code: 'error' });
     expect(h.triggers).toEqual([expect.objectContaining({ fn: 'sendEveningEmail', hour: 18, minute: 0 })]);
-    expect(JSON.parse(h.props.email)).toEqual({ enabled: true, hour: 18, minute: 0, tz: DHAKA });
+    expect(JSON.parse(h.props.email)).toEqual({ enabled: true, when: 'fixed', hour: 18, minute: 0, tz: DHAKA });
     expect(h.lockHeld).toBe(false);
   });
 

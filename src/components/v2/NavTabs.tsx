@@ -5,8 +5,9 @@ import { formatHm } from '../../utils/workday';
 export type V2Tab = AppNavTab;
 
 export const V2_TABS: { id: V2Tab; label: string }[] = [
-  { id: 'today', label: 'Today' },
-  { id: 'tasks', label: 'Tasks' },
+  // Tab names are verbs: Do (today's work) and Plan (every task by due date). The ids stay as stored.
+  { id: 'today', label: 'Do' },
+  { id: 'tasks', label: 'Plan' },
   { id: 'history', label: 'History' },
   { id: 'settings', label: 'Settings' },
 ];
