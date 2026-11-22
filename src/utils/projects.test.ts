@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { splitProjectTag } from './projects';
+import { splitProjectTag, typoDistance } from './projects';
 import type { Project } from '../types';
 
 const p = (id: string, name: string, isArchived = false): Project => ({ id, name, color: '#000000', isArchived });
@@ -39,5 +39,29 @@ describe('splitProjectTag', () => {
   it('ignores trailing spaces and a tag on its own', () => {
     expect(splitProjectTag('Write docs #hr  ', projects).project?.id).toBe('b');
     expect(splitProjectTag('#hr', projects)).toEqual({ text: '', tag: 'hr', project: projects[1] });
+  });
+});
+
+describe('splitProjectTag: typos and a tag typed first', () => {
+  const list = [p('h', 'hims'), p('i', 'idim'), p('g', 'General')];
+  it('picks the one project a single typo away', () => {
+    expect(splitProjectTag('Stock page stale #hmis', list)).toEqual({ text: 'Stock page stale', tag: 'hmis', project: list[0] });
+    expect(splitProjectTag('Fix it #idmi', list).project?.id).toBe('i');
+  });
+  it('a tag typed first, then the task, picks the project and leaves the task text', () => {
+    expect(splitProjectTag('#hmis CHUADANGA Stock stay stale', list)).toEqual({ text: 'CHUADANGA Stock stay stale', tag: 'hmis', project: list[0] });
+    expect(splitProjectTag('#hims Fix the page', list).project?.id).toBe('h');
+  });
+  it('leaves short words, numbers and unknown words alone', () => {
+    expect(splitProjectTag('Fix it #hi', list).project?.id).toBe('h'); // a prefix, not a typo
+    expect(splitProjectTag('Fix it #hm', list).project).toBeUndefined(); // too short to be a typo
+    expect(splitProjectTag('Fix it #xyz', list).project).toBeUndefined();
+    expect(splitProjectTag('#212 is the PR to review', list)).toEqual({ text: '#212 is the PR to review' });
+    expect(splitProjectTag('#nope do this', list)).toEqual({ text: '#nope do this' });
+  });
+  it('typoDistance counts a swap of neighbours as one edit', () => {
+    expect(typoDistance('hmis', 'hims')).toBe(1);
+    expect(typoDistance('hims', 'hims')).toBe(0);
+    expect(typoDistance('hid', 'hmi')).toBe(2);
   });
 });

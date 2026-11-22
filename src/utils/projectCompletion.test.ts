@@ -94,3 +94,17 @@ describe('resolveProject', () => {
     expect(resolveProject(projects, 'p4', 'gone')?.id).toBe('p1');
   });
 });
+
+describe('completionState: typos', () => {
+  const list = [proj('h', 'hims'), proj('i', 'idim')];
+  it('offers the project one typo away, and still offers to create the word', () => {
+    expect(completionState('#hmis', list)).toMatchObject({ open: true, canCreate: true });
+    expect(completionState('#hmis', list).matches.map((p) => p.id)).toEqual(['h']);
+  });
+  it('offers no typo matches for a short word or when a name starts with it', () => {
+    expect(completionState('#hi', list).matches.map((p) => p.id)).toEqual(['h']);
+    expect(completionState('#hi', list).canCreate).toBe(false);
+    expect(completionState('#hm', list)).toMatchObject({ matches: [], canCreate: true });
+    expect(completionState('#xq', list)).toMatchObject({ matches: [], canCreate: true });
+  });
+});

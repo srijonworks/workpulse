@@ -1,17 +1,15 @@
 import type { Project } from '../types';
 import { SWATCHES } from '../components/v2/ProjectSwatches';
-import { activeProjectsOf, defaultProject } from './projects';
-
-const squash = (s: string) => s.replace(/\s+/g, '').toLowerCase();
+import { defaultProject, projectsForTag } from './projects';
 
 export interface CompletionState {
   /** True when the list should show: matching projects, or the "Create it" row. */
   open: boolean;
   /** The letters typed after the "#" (empty for a bare "#"). */
   query: string;
-  /** Active projects whose names start with the query (all of them for a bare "#"). */
+  /** Active projects whose names start with the query (all of them for a bare "#"); with none, those one typo away. */
   matches: Project[];
-  /** No project matches a non-empty, non-numeric word: offer to create it. */
+  /** No project name starts with a non-empty, non-numeric word: offer to create it (after any typo matches). */
   canCreate: boolean;
   /** Where the "#word" sits in the text: wordStart is the "#", wordEnd the end of the word. */
   wordStart: number;
@@ -34,9 +32,10 @@ const CLOSED: CompletionState = { open: false, query: '', matches: [], canCreate
 export function completionState(text: string, projects: Project[]): CompletionState {
   const { query, wordStart } = lastTag(text);
   if (wordStart < 0 || /^\d+$/.test(query)) return CLOSED;
-  const key = squash(query);
-  const matches = activeProjectsOf(projects).filter((p) => squash(p.name).startsWith(key));
-  const canCreate = matches.length === 0 && query.length > 0;
+  const found = projectsForTag(query, projects);
+  // Nothing starts with the word: offer the projects one typo away ("#hmis" for "hims") above the "Create it" row.
+  const matches = found.prefix.length > 0 ? found.prefix : found.close;
+  const canCreate = found.prefix.length === 0 && query.length > 0;
   return { open: matches.length > 0 || canCreate, query, matches, canCreate, wordStart, wordEnd: text.length };
 }
 

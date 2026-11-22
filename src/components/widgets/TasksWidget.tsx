@@ -133,9 +133,14 @@ export const TasksWidget: React.FC<{ snap: WidgetSnapshot | null }> = ({ snap })
 
       {running.map((t) => (
         <div key={t.id} className="wg border-b border-[var(--border-app)] bg-[var(--bg-subtle)] px-3 py-2.5">
-          <div className="flex items-center gap-2">
-            <Dot color={t.color} />
-            <span className="min-w-0 flex-1 truncate text-[length:var(--fs-body)] font-semibold">{t.title}</span>
+          {/* Two lines, then clamped; the dot and ⋯ stay on the first line. */}
+          <div className="flex items-start gap-2">
+            <span className="mt-[0.45em] flex">
+              <Dot color={t.color} />
+            </span>
+            <span title={t.title} className="min-w-0 flex-1 line-clamp-2 break-words text-[length:var(--fs-body)] font-semibold leading-snug">
+              {t.title}
+            </span>
             <MoreButton title={t.title} open={moreId === t.id} onToggle={() => toggle(t.id)} />
           </div>
           <div className="mt-1 flex items-center gap-2">
@@ -161,10 +166,14 @@ export const TasksWidget: React.FC<{ snap: WidgetSnapshot | null }> = ({ snap })
         {snap && running.length === 0 && open.length > 0 && <li className={`px-3 pt-2 ${NOTE}`}>Nothing running.</li>}
         {open.map((t) => (
           <li key={t.id} className="border-b border-[var(--border-app)] px-3 py-2 last:border-b-0">
-            <div className="flex items-center gap-2">
-              <Dot color={t.color} />
+            <div className="flex items-start gap-2">
+              <span className="mt-[0.45em] flex">
+                <Dot color={t.color} />
+              </span>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[length:var(--fs-body)]">{t.title}</div>
+                <div title={t.title} className="line-clamp-2 break-words text-[length:var(--fs-body)] leading-snug">
+                  {t.title}
+                </div>
                 {(STATE_NOTE[t.state] || t.project) && (
                   <div className={`truncate ${NOTE}`}>{[STATE_NOTE[t.state], t.project].filter(Boolean).join(' · ')}</div>
                 )}

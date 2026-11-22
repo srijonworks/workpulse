@@ -57,19 +57,62 @@ export function shortFolder(path: string): string {
 
 const squash = (s: string) => s.replace(/\s+/g, '').toLowerCase();
 
+/** Edit distance where swapping two neighbouring letters counts as one edit ("hmis" to "hims" is 1). */
+export function typoDistance(a: string, b: string): number {
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[a.length][b.length];
+}
+
+/** The shortest tag that may be a typo: shorter words match too much by accident. */
+const TYPO_MIN = 3;
+
 /**
- * Quick-add inputs: a trailing "#word" picks a project by name prefix (case and spaces ignored,
- * archived projects skipped). A matched tag is removed from the text; with no match the text stays
- * whole and `project` is absent.
+ * Active projects a "#word" names (case and spaces ignored). `exact` and `prefix` are sure matches; `close` are names whose
+ * start is one typo away ("#hmis" for "hims"), offered only when nothing matches for sure.
  */
-export function splitProjectTag(input: string, projects: Project[]): { text: string; tag?: string; project?: Project } {
-  const m = /(?:^|\s)#(\S+)\s*$/.exec(input);
-  if (!m) return { text: input.trim() };
-  const tag = m[1];
+export function projectsForTag(tag: string, projects: Project[]): { exact?: Project; prefix: Project[]; close: Project[] } {
   const key = squash(tag);
   const active = activeProjectsOf(projects);
-  // An exact name wins over an earlier prefix match ("#App" with "App Admin" listed before "App").
-  const project = active.find((p) => squash(p.name) === key) ?? active.find((p) => squash(p.name).startsWith(key));
-  // No match keeps the whole text: "#212" may be part of it ("Review PR #212").
-  return project ? { text: input.slice(0, m.index).trim(), tag, project } : { text: input.trim(), tag };
+  const exact = active.find((p) => squash(p.name) === key);
+  const prefix = active.filter((p) => squash(p.name).startsWith(key));
+  const close =
+    prefix.length === 0 && key.length >= TYPO_MIN
+      ? active.filter((p) => typoDistance(key, squash(p.name).slice(0, key.length)) <= 1)
+      : [];
+  return { exact, prefix, close };
+}
+
+/** The project a typed tag picks: the exact name, else the first name it starts, else the only one a typo away. */
+function projectOfTag(tag: string, projects: Project[]): Project | undefined {
+  const r = projectsForTag(tag, projects);
+  return r.exact ?? r.prefix[0] ?? (r.close.length === 1 ? r.close[0] : undefined);
+}
+
+/**
+ * Quick-add inputs: a "#word" at the end (or at the start) picks a project by name: exact, else prefix, else the one project
+ * a single typo away (case and spaces ignored, archived projects skipped). A matched tag is removed from the text; with no
+ * match the text stays whole and `project` is absent.
+ */
+export function splitProjectTag(input: string, projects: Project[]): { text: string; tag?: string; project?: Project } {
+  const end = /(?:^|\s)#(\S+)\s*$/.exec(input);
+  if (end) {
+    const project = projectOfTag(end[1], projects);
+    // No match keeps the whole text: "#212" may be part of it ("Review PR #212").
+    if (project) return { text: input.slice(0, end.index).trim(), tag: end[1], project };
+  }
+  // "#hims Fix the stock page": a project tag typed first, then the task.
+  const start = /^\s*#(\S+)\s+(?=\S)/.exec(input);
+  if (start && !/^\d+$/.test(start[1])) {
+    const project = projectOfTag(start[1], projects);
+    if (project) return { text: input.slice(start[0].length).trim(), tag: start[1], project };
+  }
+  return end ? { text: input.trim(), tag: end[1] } : { text: input.trim() };
 }

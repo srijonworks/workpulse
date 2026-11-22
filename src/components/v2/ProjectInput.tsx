@@ -74,7 +74,8 @@ export const ProjectInput: React.FC<ProjectInputProps> = ({
   const state = completionState(multiline ? '' : before, projects);
   const lineMatches = multiline ? firstWordMatches(before, projects) : [];
   const open = (multiline ? lineMatches.length > 0 : state.open) && dismissed !== before;
-  const options: (Project | 'create')[] = multiline ? lineMatches : state.canCreate ? ['create'] : state.matches;
+  // Typo matches ("#hmis" for "hims") come first, so Tab and Enter take the project; "Create it" stays one arrow away.
+  const options: (Project | 'create')[] = multiline ? lineMatches : [...state.matches, ...(state.canCreate ? (['create'] as const) : [])];
   const current = Math.min(active, options.length - 1);
 
   useLayoutEffect(() => {
