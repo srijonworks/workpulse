@@ -1,5 +1,5 @@
-import type { BacklogTask, StandupRecord, WorkLog } from '../types';
-import { addDays, parseLocalDate } from './dates';
+import type { BacklogTask, Project, StandupRecord, WorkLog } from '../types';
+import { addDays, localDateOfIso, localTimeStr, parseLocalDate } from './dates';
 import { redactSecrets, clip } from './activity/sanitize';
 
 export interface StandupPeriod {
@@ -76,6 +76,43 @@ export function standupContext(i: {
     for (const t of tasks.slice(0, 20)) parts.push(clip(`${t.dueDate} ${t.title}`, 160));
   }
   return clip(redactSecrets(parts.join('\n')), MAX_CONTEXT_CHARS);
+}
+
+/**
+ * What a standup is written from: the period's logs and the tasks done in it, as one list. A done task already covered by a
+ * log (the log was made from it, lists it as a sub-task, or has the same text) is not listed twice. Done tasks become
+ * log-shaped entries (id "task:<id>", tracked minutes). The writers turn each log's sub-tasks into sub-points.
+ */
+export function standupEntries(i: { logs: WorkLog[]; tasks: BacklogTask[]; projects: Project[]; from: string; to: string }): WorkLog[] {
+  const inRange = (d: string) => d >= i.from && d <= i.to;
+  const logs = i.logs.filter((l) => inRange(l.date));
+  const covered = new Set<string>();
+  const texts = new Set<string>();
+  for (const l of logs) {
+    for (const s of l.sourceIds ?? []) if (s.startsWith('task:')) covered.add(s.slice(5));
+    for (const u of l.underlyingTasks ?? []) covered.add(u.id);
+    texts.add(l.description.trim().toLowerCase());
+  }
+  const names = new Map(i.projects.map((p) => [p.id, p.name]));
+  const done: WorkLog[] = [];
+  for (const t of i.tasks) {
+    if (!(t.stage === 'done' || t.completed)) continue;
+    const day = t.completedAt ? localDateOfIso(t.completedAt) : t.dueDate;
+    if (!day || !inRange(day) || covered.has(t.id) || texts.has(t.title.trim().toLowerCase())) continue;
+    done.push({
+      id: `task:${t.id}`,
+      date: day,
+      time: t.completedAt ? localTimeStr(new Date(t.completedAt)) : '',
+      projectId: t.projectId,
+      projectName: names.get(t.projectId) ?? 'General',
+      description: t.title,
+      status: 'completed',
+      tags: [],
+      durationMinutes: Math.floor((t.elapsedSeconds ?? 0) / 60) || undefined,
+      createdAt: t.completedAt ?? '',
+    });
+  }
+  return [...logs, ...done].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
 }
 
 /** Replaces the record with the same id, or adds it. */

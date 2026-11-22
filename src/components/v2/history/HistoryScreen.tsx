@@ -13,7 +13,7 @@ import { sameTasksIgnoringLiveTime } from '../../../utils/timerStore';
 import { useNow } from '../useNow';
 import { LogRow, formatMinutes } from '../today/LogRow';
 import { RowMenu } from '../RowMenu';
-import { RichText } from '../../ui/RichText';
+import { StandupView } from '../../ui/StandupView';
 import { WeekStrip } from './WeekStrip';
 import { SyncButton, type SyncState } from '../SyncButton';
 
@@ -500,7 +500,7 @@ const HistoryScreenView: React.FC<HistoryScreenProps> = ({
                         {rewriteNote.text}
                       </p>
                     )}
-                    <RichText text={standup} groupProjects className="v2-panel v2-row v2-inset text-[length:var(--fs-body)]" />
+                    <StandupView text={standup} projects={projects} className="v2-panel v2-row v2-inset text-[length:var(--fs-body)]" />
                   </div>
                 )}
               </section>

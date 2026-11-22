@@ -3,7 +3,7 @@ import { Check, Copy, ExternalLink, Loader2 } from 'lucide-react';
 import type { AppSettings } from '../../../types';
 import type { PhoneSyncStatus } from '../../../hooks/usePhoneSync';
 import { SHEET_SENDS_SCRIPT_VERSION, getScriptVersion, resetPhoneAccess, sendTestEmail, setEmailSchedule, setPhonePin } from '../../../utils/phoneApi';
-import { APPS_SCRIPT_SCOPES_SNIPPET } from '../../../utils/googleAppsScriptTemplate';
+import { APPS_SCRIPT_SCOPES_SNIPPET, LATEST_SCRIPT_VERSION } from '../../../utils/googleAppsScriptTemplate';
 import { emailWhenOf, type EmailWhen } from '../../../utils/emailWhen';
 import { DEFAULT_EMAIL_TIME, cleanRecipients, emailTimeAllowed, parseEmailTime, phoneLink } from '../../../utils/phoneSettings';
 import { GOOGLE_APPS_SCRIPT_CODE } from '../../../utils/googleAppsScriptTemplate';
@@ -426,6 +426,12 @@ export const PhoneEmailSection: React.FC<PhoneEmailSectionProps> = ({ settings, 
                 ))}
             </span>
           </p>
+          {version < LATEST_SCRIPT_VERSION && (
+            <p role="alert" className="text-danger">
+              Your Sheet runs script version {version}; version {LATEST_SCRIPT_VERSION} is out (new email design). Re-paste the script
+              (Settings &gt; Google Sheet &gt; Copy code) and update your existing deployment (Deploy, Manage deployments, edit, New version).
+            </p>
+          )}
           {token && status.lastError && <p className="text-danger">The last try failed: {status.lastError}</p>}
           {token && status.deviceChanged && (
             <p className="text-danger">Another computer is also sending data to this Sheet. Only one computer should.</p>

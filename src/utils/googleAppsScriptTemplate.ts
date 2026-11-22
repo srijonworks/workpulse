@@ -5,7 +5,7 @@ import { SCRIPT_BACKUP } from './appsScript/backup';
 
 const HEADER = `/**
  * =========================================================================
- * WorkPulse - Google Sheets Sync Backend (version 8)
+ * WorkPulse - Google Sheets Sync Backend (version 9)
  * =========================================================================
  *
  * INSTRUCTIONS TO DEPLOY (first time):
@@ -158,6 +158,9 @@ function upsertRows(sheet, rows) {
 `;
 
 export const GOOGLE_APPS_SCRIPT_CODE = HEADER + LOGS_SCRIPT + SCRIPT_CORE + SCRIPT_EMAIL + SCRIPT_BACKUP + SCRIPT_PHONE;
+
+/** The version of the script this app ships (SCRIPT_VERSION in core.ts). A Sheet on an older one is told to re-paste and redeploy. */
+export const LATEST_SCRIPT_VERSION = Number(/var SCRIPT_VERSION = (\d+);/.exec(SCRIPT_CORE)?.[1] ?? 0);
 
 /**
  * The permissions the script needs, for the "oauthScopes" part of the project's appsScript.json. A project whose manifest lists

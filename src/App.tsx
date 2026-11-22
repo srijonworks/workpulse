@@ -1537,7 +1537,7 @@ export default function App() {
   });
   // Saved standups: written once for each closed day (after the day-close job, or 30 minutes after the clock-out), and on a
   // Thursday also for the week Friday to Thursday. Saved whenever they change.
-  const { ensureStandup, ensureWeekStandup, rewrite } = useStandups({ enabled: dataLoaded && settings.autoDayEnabled !== false, logs, backlog, settings, workdays, standups, setStandups });
+  const { ensureStandup, ensureWeekStandup, rewrite } = useStandups({ enabled: dataLoaded && settings.autoDayEnabled !== false, logs, backlog, projects, settings, workdays, standups, setStandups });
   useEffect(() => {
     if (!dataLoaded) return;
     saveStandups(standups);

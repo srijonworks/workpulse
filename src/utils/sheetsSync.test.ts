@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { syncBatchLogsToSheet, syncSingleLogToSheet, testSheetConnection, toSheetLog } from './sheetsSync';
+import { LATEST_SCRIPT_VERSION } from './googleAppsScriptTemplate';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -8,9 +9,16 @@ describe('testSheetConnection', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => body })));
   const URL_ = 'https://script.google.com/macros/s/AKfyc123/exec';
 
-  it('version 3 is current', async () => {
-    answer({ status: 'ok', version: 3, message: 'WorkPulse Google Sheets Sync is active and connected!' });
+  it('the latest version just connects', async () => {
+    answer({ status: 'ok', version: LATEST_SCRIPT_VERSION, message: 'WorkPulse Google Sheets Sync is active and connected!' });
     expect(await testSheetConnection(URL_)).toEqual({ success: true, message: 'WorkPulse Google Sheets Sync is active and connected!' });
+  });
+  it('an older version that works is told to re-paste and redeploy', async () => {
+    answer({ status: 'ok', version: LATEST_SCRIPT_VERSION - 1, message: 'active' });
+    const r = await testSheetConnection(URL_);
+    expect(r.success).toBe(true);
+    expect(r.message).toContain(`version ${LATEST_SCRIPT_VERSION} is out`);
+    expect(r.message).toMatch(/Re-paste the script below, then update your existing deployment/);
   });
   it('version 2 still syncs logs but is old for the phone features', async () => {
     answer({ status: 'ok', version: 2, message: 'active' });

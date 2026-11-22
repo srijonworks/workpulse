@@ -94,7 +94,7 @@ describe('script v8: the Sheet sends closed days itself', () => {
     expect(h.run('sendEveningEmail')).toEqual({ sent: true });
     expect(h.mails).toHaveLength(1);
     expect(h.mails[0].subject).toContain('Wed 18 Nov');
-    expect(h.mails[0].htmlBody).toContain('What I completed today:');
+    expect(h.mails[0].htmlBody).toContain('What I completed today</div>');
     expect(h.mails[0].htmlBody).toContain('Work a');
     expect(h.mails[0].body).toMatch(/IN PROGRESS[^]*Work b/);
     expect(h.mails[0].body).not.toContain('No data from your PC today');
@@ -197,7 +197,7 @@ describe('script v8: the Sheet sends closed days itself', () => {
     const week = h.mails.find((m) => m.subject.includes('week standup'));
     expect(h.mails).toHaveLength(2);
     expect(week?.subject).toContain('13 Nov to 19 Nov');
-    expect(week?.htmlBody).toContain('What I completed this week:');
+    expect(week?.htmlBody).toContain('What I completed this week</div>');
     expect(week?.htmlBody).toContain('Work mon');
     h.run('sendEveningEmail');
     expect(h.mails).toHaveLength(2);
@@ -225,5 +225,45 @@ describe('script v8: the Sheet sends closed days itself', () => {
     h.setNow(new Date('2026-11-18T12:00:00Z')); // 18:00 in Dhaka, the saved hour
     expect(h.run('sendEveningEmail')).toEqual({ sent: false });
     expect(h.mails).toHaveLength(0);
+  });
+});
+
+describe('script v8: the Sheet writes the standup from logs and done tasks together', () => {
+  it('lists a done task no log names, and a log with its sub-tasks as sub-points', () => {
+    const { h, token } = setup('2026-11-18T03:00:00Z');
+    clockoutMode(h, token);
+    h.call('pushState', {
+      token, today: '2026-11-18', workdays: WED, tz: DHAKA, deviceId: 'd', workdayHours: 8, projects: [{ id: 'p1', name: 'hims', color: '#0a0' }],
+      logs: [log('a', '2026-11-18', { description: 'Made HMIS stateless', subTasks: ['Shared rate limits', 'One delivery per complaint'] })],
+      tasks: [
+        { id: 't1', title: 'Fix the voucher bug', project: 'hims', projectId: 'p1', dueDate: '2026-11-18', stage: 'done', trackedMinutes: 40, completedAt: '2026-11-18T08:00:00.000Z' },
+        { id: 't2', title: 'made hmis stateless', project: 'hims', projectId: 'p1', dueDate: '2026-11-18', stage: 'done', trackedMinutes: 5, completedAt: '2026-11-18T08:00:00.000Z' },
+      ],
+    });
+    h.setNow(new Date('2026-11-18T10:30:00Z'));
+    h.run('sendEveningEmail');
+    const text = h.sheets.WorkPulse_Standups.find((r) => r[0] === 'day:2026-11-18')?.[4] as string;
+    expect(text).toContain('- *hims:* Made HMIS stateless\n  - Shared rate limits\n  - One delivery per complaint');
+    expect(text).toContain('- *hims:* Fix the voucher bug');
+    expect(text.match(/stateless/gi)).toHaveLength(1);
+    expect(h.mails[0].htmlBody).toMatch(/Made HMIS stateless[^]*>&ndash;<\/td><td[^>]*>Shared rate limits</);
+  });
+});
+
+describe('script v8: no second list of done tasks under a standup', () => {
+  it('the clock-out email with a standup has no "Done today" list; the summary row still counts them', () => {
+    const { h, token } = setup('2026-11-18T03:00:00Z');
+    clockoutMode(h, token);
+    h.call('pushState', {
+      token, today: '2026-11-18', workdays: WED, tz: DHAKA, deviceId: 'd', workdayHours: 8, projects: [{ id: 'p1', name: 'hims', color: '#0a0' }],
+      logs: [log('a', '2026-11-18')],
+      tasks: [{ id: 't1', title: 'Fix the voucher bug', project: 'hims', projectId: 'p1', dueDate: '2026-11-18', stage: 'done', trackedMinutes: 40, completedAt: '2026-11-18T08:00:00.000Z' }],
+    });
+    h.setNow(new Date('2026-11-18T10:30:00Z'));
+    h.run('sendEveningEmail');
+    const html = h.mails[0].htmlBody;
+    expect(html).toContain('>Standup<');
+    expect(html).not.toContain('>Done today<');
+    expect(html).toContain('task done');
   });
 });

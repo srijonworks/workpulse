@@ -4,7 +4,7 @@ import { groupByProject, parseBlocks, type Inline } from '../../utils/richText';
 // Shows standups and AI summaries with their *bold*, _italic_, `code`, links, bullets and headings drawn properly. Elements only,
 // never HTML strings. Use for read-only text; editable text stays in a textarea.
 
-const inline = (parts: Inline[]): React.ReactNode[] =>
+export const inline = (parts: Inline[]): React.ReactNode[] =>
   parts.map((p, i) => {
     switch (p.kind) {
       case 'bold':

@@ -2,6 +2,7 @@ import { WorkLog } from '../types';
 import { isTransientSheetText } from './aiErrors';
 import { requestJson } from './net/http';
 import { scriptClientTimeoutMs } from './net/scriptTimeouts';
+import { LATEST_SCRIPT_VERSION } from './googleAppsScriptTemplate';
 
 export interface SyncResult {
   success: boolean;
@@ -47,6 +48,8 @@ export async function testSheetConnection(scriptUrl: string): Promise<SyncResult
   } else if (version < 3) {
     message =
       'Connected. Log sync works, but the phone page and evening email need the latest script: re-paste it below, then update your existing deployment (Deploy, Manage deployments, edit, New version).';
+  } else if (version < LATEST_SCRIPT_VERSION) {
+    message = `Connected. Your script is version ${version}; version ${LATEST_SCRIPT_VERSION} is out (new email design). Re-paste the script below, then update your existing deployment (Deploy, Manage deployments, edit, New version).`;
   }
   return { success: true, message };
 }

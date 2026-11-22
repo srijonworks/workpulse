@@ -12,7 +12,7 @@ function setup(over: Partial<StandupDeps> = {}) {
   let standups: StandupRecord[] = over.standups ?? [];
   const writer = vi.fn().mockResolvedValue({ text: 'T', writer: 'claude' });
   const deps: StandupDeps = {
-    enabled: true, logs: [log('2026-11-12')], backlog: [], settings: DEFAULT_SETTINGS, workdays: {},
+    enabled: true, logs: [log('2026-11-12')], backlog: [], projects: [], settings: DEFAULT_SETTINGS, workdays: {},
     standups, setStandups: (f) => { standups = f(standups); }, writer, now: () => 'NOW', ...over,
   };
   return { deps, writer, get: () => standups };

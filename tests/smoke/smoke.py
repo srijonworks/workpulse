@@ -1127,7 +1127,7 @@ def standup_renders_marks(s):
     s.tab("history")
     card = p.locator("main").get_by_text("Code fixes").first
     expect(card).to_be_visible(timeout=5000)
-    expect(p.locator("main strong", has_text="What I completed today:")).to_be_visible()
+    expect(p.locator("main").get_by_role("heading", name="What I completed today:")).to_be_visible()
     hims = p.get_by_role("region", name="hims", exact=True)
     expect(hims.get_by_role("listitem")).to_have_count(2)
     expect(p.get_by_role("region", name="idim", exact=True).get_by_role("listitem")).to_have_count(1)
@@ -2110,6 +2110,8 @@ def email_sheet_sends(s):
     sec.scroll_into_view_if_needed()
     expect(sec.get_by_role("radio", name=re.compile(r"When I clock out"))).to_be_checked(timeout=5000)
     expect(sec).not_to_contain_text("so this email is sent from your PC")
+    # a version 8 Sheet is told a newer script is out and how to update it
+    expect(sec.get_by_role("alert").filter(has_text=re.compile(r"version 8; version \d+ is out"))).to_be_visible()
     btn(sec, SEL["email_save"], exact=True).click()
     expect(sec).to_contain_text("Your Sheet sends it 10 to 25 minutes after you clock out", timeout=5000)
     mail = stub.payloads("setEmail")[-1]

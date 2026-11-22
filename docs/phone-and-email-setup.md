@@ -18,7 +18,7 @@ You need the Google Sheet you already sync logs to, with its script. A phone and
 4. Google asks for permission again. Allow all of it: the Sheet, sending email to you, and running timers (the daily one and
    the one-off ones that send a standup email later).
    (If a screen says the app is not verified, choose Advanced and continue; it is your own script.)
-5. Back in WorkPulse, **Settings > Phone & evening email**. The section should say the script is version 8.
+5. Back in WorkPulse, **Settings > Phone & evening email**. The section should say the script is version 9.
    If it says an older version, the paste or the new version in step 3 did not take; repeat them.
 6. Press **Set PIN** and type a 4-digit PIN twice. WorkPulse keeps only a token for this computer, never the PIN.
 7. Choose the time for the evening email (from 00:30 to 23:29), tick **Send me an evening email**, press **Save**, then
@@ -40,6 +40,13 @@ Notes:
   `WorkPulse_Projects`, from version 4 `WorkPulse_Backup`, and from version 6 `WorkPulse_DayHistory` and `WorkPulse_Standups`).
   `WorkPulse_Logs` keeps its columns and gains an `Origin` column at the end (version 6; `auto` for a log WorkPulse wrote itself).
   Do not edit the new tabs; WorkPulse rewrites them.
+
+## Updating to script version 9
+
+Version 9 changes only how the emails look (the designs in `docs/email-designs/`): a bigger hours figure, In and Out as
+separate figures, project labels in capitals, coloured pills for paused and blocked tasks, and sizes that fit a phone.
+Nothing about when or how emails are sent changes. Update it with the same steps as for version 8 below; Settings shows a
+notice until the Sheet runs version 9.
 
 ## Updating to script version 8
 
@@ -113,8 +120,8 @@ cleared browser or a dead computer does not lose it.
 
 The automated tests use fakes for Google. Do these once against the real Sheet, and tick them off.
 
-1. **Version.** WorkPulse Settings > Phone & evening email says script version 8 (or open the `/exec` link with
-   `?action=ping`; it answers `"version":8`).
+1. **Version.** WorkPulse Settings > Phone & evening email says script version 9 (or open the `/exec` link with
+   `?action=ping`; it answers `"version":9`).
 2. **Same URL.** After step 3 above the link in WorkPulse still works with no change. (Editing the existing
    deployment keeps the URL; **New deployment** would not.)
 3. **Phone page opens.** `<your /exec link>?page=phone` shows the PIN keypad. A wrong PIN says so and counts the

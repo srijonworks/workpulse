@@ -69,7 +69,9 @@ export async function generateAiReport(params: GenerateReportParams): Promise<Ge
       const duration = l.durationMinutes ? ` (${l.durationMinutes}m)` : '';
       const tags = l.tags.length ? ` [${l.tags.join(' ')}]` : '';
       const link = l.linkUrl ? ` - Link: ${l.linkUrl}` : '';
-      return `${i + 1}. [${l.status.toUpperCase()}] [Project: ${l.projectName}] ${l.description}${duration}${tags}${link}`;
+      // Sub-tasks go under their entry, so the standup can list them as sub-points.
+      const subs = (l.underlyingTasks ?? []).map((u) => `\n   - ${u.title}`).join('');
+      return `${i + 1}. [${l.status.toUpperCase()}] [Project: ${l.projectName}] ${l.description}${duration}${tags}${link}${subs}`;
     })
     .join('\n');
 
@@ -81,7 +83,7 @@ Follow the exact requested format, tone, and audience constraints faithfully.`;
     format === 'whatsapp'
       ? `A concise, polite WhatsApp message for a direct manager or lead. Use WhatsApp markdown (*bold*, _italic_). Keep it professional, mobile-friendly and scannable. Use no emoji, or at most one where it truly helps.`
       : format === 'slack'
-      ? `A clean, professional Slack/Teams standup update with exactly three sections. Use plain bold headings with no emoji. Under each heading write short bullets, one per piece of work, starting with the project name in bold (for example "- *project:* what was done"). No filler and no exclamation marks. The sections are:
+      ? `A clean, professional Slack/Teams standup update with exactly three sections. Use plain bold headings with no emoji. Under each heading write short bullets, one per piece of work, starting with the project name in bold (for example "- *project:* what was done"). Logs and done tasks are one list: merge entries about the same work into one bullet. When a piece of work has notable steps (the entry's sub-tasks), list up to four of them as sub-points under its bullet, each on its own line starting with two spaces and "- " (for example "  - added the outbox table"). No filler and no exclamation marks. The sections are:
 *What I completed today:*
 *In progress / Rolling over:*
 *Blockers / Waiting on:*`
@@ -189,39 +191,26 @@ export function generateFallbackTemplate(
   }
 
   if (format === 'slack') {
-    let out = `*Daily Standup — ${todayStr}*\n\n`;
-
-    out += `*What I completed today:*\n`;
-    if (completed.length > 0) {
-      completed.forEach((l) => {
-        const link = l.linkUrl ? ` (<${l.linkUrl}|Link>)` : '';
-        out += `• [${l.projectName}] ${l.description}${link}\n`;
-      });
-    } else {
-      out += `• None completed today\n`;
-    }
-    out += '\n';
-
-    out += `*In progress / Rolling over:*\n`;
-    if (inProgress.length > 0) {
-      inProgress.forEach((l) => {
-        out += `• [${l.projectName}] ${l.description}\n`;
-      });
-    } else {
-      out += `• No ongoing tasks in flight\n`;
-    }
-    out += '\n';
-
-    out += `*Blockers / Waiting on:*\n`;
-    if (blocked.length > 0) {
-      blocked.forEach((l) => {
-        out += `• [${l.projectName}] ${l.description}\n`;
-      });
-    } else {
-      out += `• None, clear path forward\n`;
-    }
-
-    return out;
+    // The shared standup format (src/utils/standupDoc.ts): bold headings, "- *project:* text" points, sub-tasks as indented
+    // "  - " sub-points, so History and the emails draw it the same way.
+    const when = periodLabel && /week/i.test(periodLabel) ? 'this week' : 'today';
+    const tag = (name: string) => (name || 'General').replace(/[*:]/g, '').trim() || 'General';
+    const points = (list: WorkLog[]) =>
+      list.length === 0
+        ? '- None\n'
+        : list
+            .map((l) => {
+              const link = l.linkUrl ? ` (<${l.linkUrl}|Link>)` : '';
+              const subs = (l.underlyingTasks ?? []).slice(0, 4).map((u) => `  - ${u.title}\n`).join('');
+              return `- *${tag(l.projectName)}:* ${l.description}${link}\n${subs}`;
+            })
+            .join('');
+    return (
+      `Standup for ${todayStr}\n\n` +
+      `*What I completed ${when}:*\n${points(completed)}\n` +
+      `*In progress / Rolling over:*\n${points(inProgress)}\n` +
+      `*Blockers / Waiting on:*\n${points(blocked)}`
+    );
   }
 
   // Executive format

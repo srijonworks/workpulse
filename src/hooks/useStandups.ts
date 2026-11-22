@@ -1,9 +1,9 @@
 import { useCallback, useRef } from 'react';
-import type { AppSettings, BacklogTask, StandupRecord, WorkLog, Workdays } from '../types';
+import type { AppSettings, BacklogTask, Project, StandupRecord, WorkLog, Workdays } from '../types';
 import { generateAiReport, type ReportPeriod } from '../utils/aiGenerator';
 import { recordAiResult } from '../utils/aiResults';
 import { applyRewrite, needsRewrite } from '../utils/standupRewrite';
-import { dayPeriod, standupContext, upsertStandup, weekPeriod, type StandupPeriod } from '../utils/standup';
+import { dayPeriod, standupContext, standupEntries, upsertStandup, weekPeriod, type StandupPeriod } from '../utils/standup';
 
 export interface WriterResult {
   text: string;
@@ -40,6 +40,8 @@ export interface StandupDeps {
   enabled: boolean;
   logs: WorkLog[];
   backlog: BacklogTask[];
+  /** For the project names of done tasks (the standup is written from logs and done tasks together). */
+  projects: Project[];
   settings: AppSettings;
   workdays: Workdays;
   standups: StandupRecord[];
@@ -56,7 +58,8 @@ export async function writeStandupOnce(d: StandupDeps, period: StandupPeriod, in
     const wd = d.workdays[period.from];
     if (wd && !wd.clockOut) return null; // the day is still open
   }
-  const logs = d.logs.filter((l) => l.date >= period.from && l.date <= period.to);
+  // Logs and done tasks as one list: a day with only done tasks still gets its standup.
+  const logs = standupEntries({ logs: d.logs, tasks: d.backlog, projects: d.projects, from: period.from, to: period.to });
   if (logs.length === 0) return null;
   inFlight.add(period.id);
   try {
@@ -97,7 +100,7 @@ export async function writeStandupOnce(d: StandupDeps, period: StandupPeriod, in
 export async function rewriteStandup(d: StandupDeps, period: StandupPeriod): Promise<boolean> {
   const current = d.standups.find((s) => s.id === period.id);
   if (!current || !needsRewrite(current)) return false;
-  const logs = d.logs.filter((l) => l.date >= period.from && l.date <= period.to);
+  const logs = standupEntries({ logs: d.logs, tasks: d.backlog, projects: d.projects, from: period.from, to: period.to });
   if (logs.length === 0) return false;
   const context = standupContext({ logs: d.logs, tasks: d.backlog, from: period.from, to: period.to, dayStandups: period.kind === 'week' ? d.standups : undefined });
   const r = await (d.writer ?? chainWriter)({ logs, period, context, settings: d.settings });

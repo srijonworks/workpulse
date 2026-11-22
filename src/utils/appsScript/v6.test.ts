@@ -174,7 +174,7 @@ describe('script v6: standup emails', () => {
     expect(html).not.toContain('*hims:*');
     expect(html).not.toContain('<stock>');
     expect(html).toContain('Fixed &lt;stock&gt;');
-    expect(html).toMatch(/What I completed today:<\/div>/);
+    expect(html).toMatch(/What I completed today<\/div>/);
     // one hims group holding both of its bullets, before idim
     expect(html.match(/>hims<\/div>/g)).toHaveLength(1);
     expect(html.indexOf('>hims</div>')).toBeLessThan(html.indexOf('>idim</div>'));

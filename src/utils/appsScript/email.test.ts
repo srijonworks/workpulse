@@ -86,8 +86,8 @@ describe('evening email: content', () => {
     const { h } = evening({ logs });
     h.run('sendEveningEmail');
     const { htmlBody: html, body: text } = h.mails[0];
-    expect(html).toContain('&ndash; Filter by team');
-    expect(html).toContain('Fix &lt;b&gt;timezone&lt;/b&gt;');
+    // The HTML stays short: sub-tasks are only in the plain-text body.
+    expect(html).not.toContain('Filter by team');
     expect(text).toContain('      - Filter by team');
     expect(html).toMatch(/Deploy suggestions build<\/div>[^]*BGB Portal[^]*0:30<div[^>]*>tracked</);
     expect(text).toContain('Deploy suggestions build · BGB Portal · 0:30 tracked');
@@ -107,18 +107,19 @@ describe('evening email: content', () => {
     expect(html).toContain('Tuesday 10 November');
     expect(html).toContain('8:04');
     expect(html).toContain('worked of 8:00');
-    expect(html).toContain('In 09:48');
-    expect(html).toContain('Out 17:52');
+    expect(html).toMatch(/>In<\/div><div[^>]*>09:48</);
+    expect(html).toMatch(/>Out<\/div><div[^>]*>17:52</);
     expect(html).toContain('Data from your PC as of 17:52.');
     for (const p of ['BGB Portal', 'HR Dashboard', 'Meetings']) expect(html).toContain(p);
     expect(html).toContain('3:44');
     expect(html).toContain('3:20');
-    expect(html).toContain('Logs &middot; 5 &middot; 8:04');
+    expect(html).toContain('>Logs<');
+    expect(html).toContain('logged in 5 entries');
     expect(html).toContain('Built attendance report filters and fixed the timezone bug');
-    expect(html).toContain('Tasks done today &middot; 1');
+    expect(html).toMatch(/>Done today<\/td><td[^>]*>1</);
     expect(html).toContain('Deploy suggestions build');
     expect(html).not.toContain('Finished long ago');
-    expect(html).toContain('Still open &middot; 3');
+    expect(html).toMatch(/>Still open<\/td><td[^>]*>3</);
     expect(html).toContain('Sent by your WorkPulse script at 18:00 (Asia/Dhaka)');
     expect(html).toContain('#0f3d2e');
     expect(html).toContain('#f2b705');
@@ -127,17 +128,18 @@ describe('evening email: content', () => {
     expect(text).toContain('Built attendance report filters and fixed the timezone bug (2:10)');
   });
 
-  it('lists open tasks by date with Today, Yesterday and a dated heading, newest earlier day first', () => {
+  it('lists open tasks today first, then earlier days newest first, each with when it was due', () => {
     const { h } = evening();
     h.run('sendEveningEmail');
     const html = h.mails[0].htmlBody;
     const at_ = (s: string) => html.indexOf(s);
-    expect(at_('>Today<')).toBeGreaterThan(-1);
-    expect(at_('>Yesterday<')).toBeGreaterThan(at_('>Today<'));
-    expect(at_('>Sun 8 Nov<')).toBeGreaterThan(at_('>Yesterday<'));
-    expect(at_('Send attendance report')).toBeLessThan(at_('>Yesterday<'));
-    expect(at_('Draft RFC for search indexing')).toBeGreaterThan(at_('>Yesterday<'));
-    expect(at_('Draft RFC for search indexing')).toBeLessThan(at_('>Sun 8 Nov<'));
+    // Each title is followed by its due label, and the rows go Today, Yesterday, Sun 8 Nov.
+    expect(at_('Send attendance report')).toBeGreaterThan(-1);
+    expect(at_('>Today<')).toBeGreaterThan(at_('Send attendance report'));
+    expect(at_('Draft RFC for search indexing')).toBeGreaterThan(at_('>Today<'));
+    expect(at_('>Yesterday<')).toBeGreaterThan(at_('Draft RFC for search indexing'));
+    expect(at_('Review leave form API')).toBeGreaterThan(at_('>Yesterday<'));
+    expect(at_('>Sun 8 Nov<')).toBeGreaterThan(at_('Review leave form API'));
     expect(html).toMatch(/Review leave form API<\/div>[^]*>blocked</);
   });
 
@@ -160,7 +162,7 @@ describe('evening email: content', () => {
     expect(html).not.toContain('<b>Proj');
     // The only tags in the HTML are the ones the script writes.
     const tags = [...html.matchAll(/<\/?([a-z][a-z0-9]*)/gi)].map((m) => m[1].toLowerCase());
-    expect(new Set(tags)).toEqual(new Set(['html', 'head', 'meta', 'title', 'body', 'table', 'tr', 'td', 'div', 'span']));
+    expect(new Set(tags)).toEqual(new Set(['html', 'head', 'meta', 'title', 'style', 'body', 'table', 'tr', 'td', 'div', 'span']));
     expect(text).not.toMatch(/<[^>]*>/);
     expect(text).toContain('alert(1)');
   });

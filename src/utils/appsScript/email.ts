@@ -403,46 +403,57 @@ function dayEmailMail_(target, text) {
   if (target.kind === 'day') {
     return composeEmail_(false, new Date(), getMeta_(), { date: target.from, standup: text, when: 'clockout', sheetUrl: sheetUrl });
   }
-  var subject = 'WorkPulse week standup \u00b7 ' + dayText_(target.from, 'd MMM') + ' to ' + dayText_(target.to, 'd MMM');
+  var subject = 'WorkPulse week standup · ' + dayText_(target.from, 'd MMM') + ' to ' + dayText_(target.to, 'd MMM');
   // A week reads "this week", not "today" (the day email keeps "today").
   text = String(text).replace(/completed today/gi, 'completed this week');
-  var footer = 'Sent by your WorkPulse script.';
-  // The same top as the day email, summed over the week: worked of target, days and clock times, last data from the PC.
   var meta = getMeta_();
   var tz = userTz_(meta);
   var ssTz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+  var clocked = {};
   var dayRows = readTab_('WorkPulse_Days');
-  var worked = 0;
-  var days = 0;
-  var open = 0;
   for (var i = 0; i < dayRows.length; i++) {
     var dd = dateText_(dayRows[i][0], ssTz);
     if (dd < target.from || dd > target.to) continue;
     var cin = emailDate_(isoText_(dayRows[i][1]));
-    var cout = emailDate_(isoText_(dayRows[i][2]));
-    if (!cin) continue;
-    days++;
-    if (cout) worked += Math.max(0, Math.floor((cout.getTime() - cin.getTime()) / 60000));
-    else open++;
+    if (cin) clocked[dd] = { cin: cin, cout: emailDate_(isoText_(dayRows[i][2])) };
   }
-  var perDay = num_(meta.workdayHours) > 0 ? num_(meta.workdayHours) : DEFAULT_WORKDAY_HOURS;
   var pushed = emailDate_(meta.pushedAt);
-  var range = dayText_(target.from, 'd MMM') + ' to ' + dayText_(target.to, 'd MMM');
-  var daysLine = days === 0 ? 'no clocked days' : days + (days === 1 ? ' day' : ' days') + (open ? ' · ' + open + ' without a clock-out' : '');
-  var dataLine = pushed
-    ? 'The last data from your PC came on ' + Utilities.formatDate(pushed, tz, 'EEE d MMM') + ' at ' + clockTime_(pushed, tz) + '.'
-    : 'No data from your PC yet.';
-  var html = emailShell_(
-    '<tr><td style="background:#0f3d2e;color:#f4f1e8;padding:18px 24px"><div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#afbbb0;font-weight:bold">Week standup · ' + esc_(range) + '</div>' +
-      '<div style="font-size:38px;font-weight:bold;color:#f2b705;margin-top:6px;line-height:1">' + esc_(fmtHM_(worked)) +
-      ' <span style="font-size:15px;color:#f4f1e8;font-weight:normal">worked of ' + esc_(fmtHM_(Math.round(perDay * 60 * days))) + '</span></div>' +
-      '<div style="font-size:14px;margin-top:8px;color:#f4f1e8">' + esc_(daysLine) + '</div></td></tr>' +
-      '<tr><td style="padding:6px 24px 0"><div style="font-size:12px;color:#5d6b63;padding:10px 0;border-bottom:1px solid #dcd8cb">' + esc_(dataLine) + '</div></td></tr>' +
-      '<tr><td style="padding:16px 24px 4px"><div style="' + EM_LABEL + '">Standup</div></td></tr>' +
-      '<tr><td style="padding:0 24px"><div style="border-top:2px solid #1d2b24;padding-top:10px;color:#1d2b24">' + standupHtml_(text) + '</div></td></tr>' +
-      footerRow_(footer, sheetUrl));
+  // Time by project counts logged time only, not the done tasks the standup also uses.
+  var all = rangeLogs_(target.from, target.to);
+  var logs = [];
+  for (var a = 0; a < all.length; a++) if (!all[a].fromTask) logs.push(all[a]);
+  var logMinutes = 0;
+  for (var l = 0; l < logs.length; l++) logMinutes += num_(logs[l].minutes);
+  var html = weekEmailHtml_(weekModel_(target, clocked, num_(meta.workdayHours) > 0 ? num_(meta.workdayHours) : DEFAULT_WORKDAY_HOURS, {
+    dataLine: pushed ? 'Data from your PC as of ' + Utilities.formatDate(pushed, tz, 'EEE d MMM') + ' at ' + clockTime_(pushed, tz) + '.' : 'No data from your PC yet.',
+    dataOk: !!pushed, standup: text, groups: logGroups_(logs, projectList_()), projectColors: projectColors_(projectList_()), logMinutes: logMinutes, footer: 'Sent by your WorkPulse script.', sheetUrl: sheetUrl
+  }));
   return { subject: subject, html: html, text: standupPlain_(text) + (sheetUrl ? '\n\nYour WorkPulse Sheet: ' + sheetUrl : '') };
 }
+
+// The week's figures from its clock-ins: { 'yyyy-MM-dd': { cin, cout } }. Pure, so the preview page can use it too.
+function weekModel_(target, clocked, hoursPerDay, extra) {
+  var perDay = Math.round(hoursPerDay * 60);
+  var days = [];
+  var worked = 0;
+  var dayCount = 0;
+  var openCount = 0;
+  for (var d = target.from; d <= target.to; d = addDays_(d, 1)) {
+    var c = clocked[d];
+    var mins = c && c.cout ? Math.max(0, Math.floor((c.cout.getTime() - c.cin.getTime()) / 60000)) : 0;
+    if (c) dayCount++;
+    if (c && !c.cout) openCount++;
+    worked += mins;
+    days.push({ label: dayText_(d, 'EEE d'), worked: mins, open: !!(c && !c.cout), off: !c });
+  }
+  var w = {
+    range: dayText_(target.from, 'd MMM') + ' to ' + dayText_(target.to, 'd MMM'), worked: worked, target: perDay * dayCount, perDay: perDay,
+    days: days, dayCount: dayCount, openCount: openCount
+  };
+  for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) w[k] = extra[k];
+  return w;
+}
+
 
 // ---- The Sheet's own standup emails (version 8) ----
 //
@@ -548,17 +559,34 @@ function sweepStandups_(targets) {
   return sent;
 }
 
-// The logs of a date range from WorkPulse_Recent.
+// What a standup is written from, as one list: the logs of a date range (WorkPulse_Recent, with their sub-tasks) and the
+// tasks done in it (WorkPulse_Tasks) that no log already names. The same merge as standupEntries in src/utils/standup.ts.
 function rangeLogs_(from, to) {
   var ssTz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+  var tz = userTz_(getMeta_());
   var rows = readTab_('WorkPulse_Recent');
   var out = [];
+  var texts = {};
   for (var i = 0; i < rows.length; i++) {
     var l = rows[i];
     if (l[0] === '') continue;
     var date = dateText_(l[1], ssTz);
     if (date < from || date > to) continue;
-    out.push({ date: date, project: String(l[3] || '') || 'No project', description: String(l[5] || ''), status: String(l[6] || ''), minutes: num_(l[7]) });
+    var description = String(l[5] || '');
+    texts['k' + description.replace(/^\s+|\s+$/g, '').toLowerCase()] = true;
+    out.push({
+      date: date, time: timeText_(l[2], ssTz), project: String(l[3] || '') || 'No project', projectId: String(l[4] || ''), description: description,
+      status: String(l[6] || ''), minutes: num_(l[7]), subTasks: String(l[8] || '') === '' ? [] : String(l[8]).split('\n')
+    });
+  }
+  var tasks = readTab_('WorkPulse_Tasks');
+  for (var j = 0; j < tasks.length; j++) {
+    var t = tasks[j];
+    if (t[0] === '' || String(t[5]) !== 'done') continue;
+    var day = emailLocalDate_(isoText_(t[7]), tz) || dateText_(t[4], ssTz);
+    var title = String(t[1] || '');
+    if (!day || day < from || day > to || texts['k' + title.replace(/^\s+|\s+$/g, '').toLowerCase()]) continue;
+    out.push({ date: day, time: '', project: String(t[2] || '') || 'No project', projectId: String(t[3] || ''), description: title, status: 'completed', minutes: num_(t[6]), subTasks: [], fromTask: true });
   }
   return out;
 }
@@ -577,36 +605,44 @@ function writeStandup_(t, deadline) {
   return { text: templateStandup_(t, logs), writer: 'template' };
 }
 
+// The same instructions as the app's writer (src/utils/aiGenerator.ts), so a standup reads the same whoever wrote it.
 function standupPrompt_(t, logs) {
   var lines = [];
   for (var i = 0; i < logs.length && i < 80; i++) {
     var l = logs[i];
+    var subs = '';
+    for (var s = 0; s < l.subTasks.length && s < 8; s++) subs += '\n   - ' + String(l.subTasks[s]).slice(0, 160);
     lines.push((i + 1) + '. [' + l.status.toUpperCase() + '] [Project: ' + l.project + '] ' + (t.kind === 'week' ? l.date + ' ' : '') +
-      l.description.slice(0, 300) + (l.minutes ? ' (' + l.minutes + 'm)' : ''));
+      l.description.slice(0, 300) + (l.minutes ? ' (' + l.minutes + 'm)' : '') + subs);
   }
   var when = t.kind === 'week' ? 'this week' : 'today';
   return 'Please generate a work report based on these logged tasks:\n\n--- LOGGED WORK ENTRIES ---\n' + lines.join('\n') +
     '\n---------------------------\n\nCovers: ' + (t.kind === 'week' ? 'the week ' + t.from + ' to ' + t.to : t.from) +
     '\n\nTarget Format: A clean, professional Slack/Teams standup update with exactly three sections. Use plain bold headings with no emoji. ' +
     'Under each heading write short bullets, one per piece of work, starting with the project name in bold (for example "- *project:* what was done"). ' +
-    'No filler and no exclamation marks. The sections are:\n*What I completed ' + when + ':*\n*In progress / Rolling over:*\n*Blockers / Waiting on:*\n' +
-    'Tone: casual\n\nGenerate the final message text now. Output it directly, with no code fence.';
+    'Logs and done tasks are one list: merge entries about the same work into one bullet. When a piece of work has notable steps (the entry\'s ' +
+    'sub-tasks), list up to four of them as sub-points under its bullet, each on its own line starting with two spaces and "- " (for example ' +
+    '"  - added the outbox table"). No filler and no exclamation marks. The sections are:\n*What I completed ' + when + ':*\n' +
+    '*In progress / Rolling over:*\n*Blockers / Waiting on:*\nTone: casual\n\nGenerate the final message text now. Output it directly, with no code fence.';
 }
 
-// The standup in plain wording: the logs under the same three headings, one bullet each, project first.
+// The standup in plain wording, in the shared format (generateFallbackTemplate in aiGenerator.ts): one point per entry, its
+// project first, up to four sub-tasks as indented sub-points.
 function templateStandup_(t, logs) {
-  function bullet(l) {
-    return '- *' + l.project.replace(/[*:]/g, '') + ':* ' + l.description.replace(/\*/g, '').replace(/\s+/g, ' ');
+  function point(l) {
+    var out = '- *' + (l.project.replace(/[*:]/g, '') || 'General') + ':* ' + l.description.replace(/\*/g, '').replace(/\s+/g, ' ');
+    for (var s = 0; s < l.subTasks.length && s < 4; s++) out += '\n  - ' + String(l.subTasks[s]).replace(/\*/g, '').replace(/\s+/g, ' ');
+    return out;
   }
   var done = [];
   var going = [];
   var blocked = [];
   for (var i = 0; i < logs.length; i++) {
-    if (logs[i].status === 'in_progress') going.push(bullet(logs[i]));
-    else if (logs[i].status === 'blocked') blocked.push(bullet(logs[i]));
-    else done.push(bullet(logs[i]));
+    if (logs[i].status === 'in_progress') going.push(point(logs[i]));
+    else if (logs[i].status === 'blocked') blocked.push(point(logs[i]));
+    else done.push(point(logs[i]));
   }
-  return '*What I completed ' + (t.kind === 'week' ? 'this week' : 'today') + ':*\n' + (done.length ? done.join('\n') : '- Nothing marked done') +
+  return '*What I completed ' + (t.kind === 'week' ? 'this week' : 'today') + ':*\n' + (done.length ? done.join('\n') : '- None') +
     '\n\n*In progress / Rolling over:*\n' + (going.length ? going.join('\n') : '- None') +
     '\n\n*Blockers / Waiting on:*\n' + (blocked.length ? blocked.join('\n') : '- None');
 }
@@ -926,9 +962,9 @@ function buildEveningEmail(data) {
   var standup = String(data.standup || '').replace(/^\s+|\s+$/g, '');
 
   var model = {
-    dayLong: dayLong, noData: noData, worked: worked, target: target, clockLine: clockLine, dataLine: dataLine,
+    dayLong: dayLong, noData: noData, worked: worked, target: target, clockLine: clockLine, dataLine: dataLine, dataOk: pushedToday || (data.when === 'clockout' && !!pushed),
     groups: groups, logCount: logs.length, logMinutes: logMinutes, done: done, openGroups: openGroups,
-    openCount: open.length, pendingLine: pendingLine, footer: footer, standup: standup, sheetUrl: String(data.sheetUrl || '')
+    openCount: open.length, pendingLine: pendingLine, footer: footer, standup: standup, projectColors: projectColors_(data.projects), sheetUrl: String(data.sheetUrl || '')
   };
   return { skip: noData && standup === '', subject: subject, html: emailHtml_(model), text: emailText_(model) };
 }
@@ -1076,51 +1112,212 @@ function stageNote_(task) {
 
 // ---- HTML (inline styles only) ----
 
-var EM_LABEL = 'font-size:13px;font-weight:bold;letter-spacing:.1em;text-transform:uppercase';
+// Design (version 9): the references in docs/email-designs/ (Main = clock-out, Week, Evening, Empty = test with no data,
+// Phone = clock-out at 390 px), built from the app's Chase tokens: page #f4f1e8, card white with #e3ddcd, text #1d2b24 and
+// #5d6b63, rules #ebe7dc, band #0f3d2e with #f2b705 for the hours. Email-safe: tables and inline styles; the <style> in the
+// head only adds hover and the phone sizes (classes wrap, hero, hn, card, sn, sc).
+var EM_FONT = "Archivo,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+var EM_INK = '#1d2b24';
+var EM_MUTED = '#5d6b63';
+var EM_FAINT = '#6b776f';
+var EM_LINE = '#ebe7dc';
+var EM_RULE = '1px solid ' + EM_LINE;
+var EM_TINT = '#f4f1e8';
+var EM_NUM = 'font-variant-numeric:tabular-nums';
+var EM_PAD = '24px';
+var EM_OK = '#047857';
+var EM_WARN = '#b45309';
+var EM_BAD = '#be123c';
+var EM_OPEN_MAX = 5;
+var EM_LABEL = 'letter-spacing:.12em;text-transform:uppercase;font-weight:bold;color:#afbbb0';
+var EM_HEAD_STYLE = 'body{margin:0}a{color:#0f3d2e}a:hover{color:#2a5546}' +
+  '@media (max-width:480px){.wrap{padding:12px 8px 24px!important}.hero{padding:24px 20px!important}.hn{font-size:48px!important}' +
+  '.card{padding:18px 16px!important}.sn{font-size:24px!important}.sc{padding-left:12px!important}}';
 
-// The page, the card and its rows: rows is the HTML of the card's table rows.
-function emailShell_(rows) {
-  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>WorkPulse</title></head>' +
-    '<body style="margin:0;background:#e7e3d6;padding:16px 8px;font-family:Arial,Helvetica,sans-serif;color:#1d2b24">' +
-    // Fluid up to 620 px, so a phone shows it at full size instead of shrinking a fixed-width card.
-    '<table role="presentation" width="100%" align="center" cellpadding="0" cellspacing="0" style="width:100%;max-width:620px;margin:0 auto;background:#fbfaf5;border:1px solid #dcd8cb">' +
-    rows + '</table></body></html>';
+// The page and the card; rows is the HTML of the card's table rows. preheader is the inbox preview line (hidden).
+function emailShell_(rows, preheader) {
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>WorkPulse</title><style>' + EM_HEAD_STYLE + '</style></head>' +
+    '<body style="margin:0;background:' + EM_TINT + '">' +
+    (preheader ? '<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">' + esc_(preheader) + '</div>' : '') +
+    '<div class="wrap" style="width:100%;max-width:700px;box-sizing:border-box;margin:0 auto;background:' + EM_TINT + ';padding:28px 30px 36px;' +
+    'font-family:' + EM_FONT + ';color:' + EM_INK + '">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;background:#ffffff;border:1px solid #e3ddcd;border-radius:14px;overflow:hidden">' +
+    rows + '</table></div></body></html>';
 }
 
-var EM_RULE = '1px solid #e4e0d4';
-
-// One list row like WorkPulse's History: an optional time column, the project's colour bar beside the content, and a
-// figure on the right; a thin line under it. timeHtml null = no time column (task lists).
-function listRow_(color, timeHtml, bodyHtml, rightHtml) {
-  return '<tr>' +
-    (timeHtml === null ? '' : '<td width="44" valign="top" style="padding:12px 10px 12px 0;font-size:12px;color:#5d6b63;white-space:nowrap;border-bottom:' + EM_RULE + '">' + timeHtml + '</td>') +
-    '<td valign="top" style="padding:10px 12px;border-left:3px solid ' + safeColor_(color) + ';border-bottom:' + EM_RULE + '">' + bodyHtml + '</td>' +
-    '<td width="56" valign="top" align="right" style="padding:10px 0 10px 8px;font-size:14px;font-weight:bold;color:#1d2b24;white-space:nowrap;border-bottom:' + EM_RULE + '">' + rightHtml + '</td>' +
-    '</tr>';
-}
-
-// The second line of a row: short parts with space between them (no separators).
-function rowMeta_(parts, gapBelow) {
-  var out = [];
-  for (var i = 0; i < parts.length; i++) {
-    if (parts[i]) out.push('<span style="margin-right:12px">' + parts[i] + '</span>');
+// The green top. hero: the big figure (a time) or null for a sentence (noData); heroNote beside it; pct (0-100) for the bar
+// or null; under it either clock cells [{ label, value, open }] or a line of text.
+function headerRow_(kicker, hero, heroNote, pct, cells, line) {
+  var h = '<tr><td class="hero" style="background:#0f3d2e;padding:30px ' + EM_PAD + ' 30px">' +
+    '<div style="font-size:12px;' + EM_LABEL + ';letter-spacing:.14em">' + kicker + '</div>';
+  h += '<div style="margin-top:14px;' + EM_NUM + '"><span class="hn" style="font-size:60px;line-height:1;font-weight:bold;color:#f2b705;letter-spacing:-.02em">' +
+    hero + '</span>' + (heroNote ? '<span style="font-size:17px;color:#f4f1e8;margin-left:12px">' + heroNote + '</span>' : '') + '</div>';
+  if (pct !== null) h += meter_(pct, '#f2b705', '#2a5546', 8, 20, 6);
+  if (cells && cells.length) {
+    var tds = [];
+    for (var i = 0; i < cells.length; i++) {
+      tds.push('<td' + (i < cells.length - 1 ? ' style="padding-right:36px"' : '') + '><div style="font-size:11px;' + EM_LABEL + '">' + cells[i].label + '</div>' +
+        '<div style="margin-top:3px;font-size:18px;font-weight:bold;color:' + (cells[i].open ? '#f2b705' : '#f4f1e8') + (cells[i].open ? '' : ';' + EM_NUM) + '">' +
+        cells[i].value + '</div></td>');
+    }
+    h += '<table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:20px"><tr>' + tds.join('') + '</tr></table>';
+  } else if (line) {
+    h += '<div style="margin-top:20px;font-size:15px;font-weight:bold;color:#f4f1e8">' + line + '</div>';
   }
-  return out.length ? '<div style="font-size:12px;line-height:1.4;color:#5d6b63;margin:3px 0 ' + (gapBelow ? '6px' : '0') + '">' + out.join('') + '</div>' : '';
+  return h + '</td></tr>';
 }
 
-// A task row: title, then project and stage; tracked time on the right.
-function taskRow_(task, withProject) {
+// The no-data header: the day, a sentence in place of the hours, and why.
+function headerEmptyRow_(kicker, title, line) {
+  return '<tr><td class="hero" style="background:#0f3d2e;padding:30px ' + EM_PAD + ' 30px">' +
+    '<div style="font-size:12px;' + EM_LABEL + ';letter-spacing:.14em">' + kicker + '</div>' +
+    '<div style="margin-top:14px;font-size:44px;line-height:1.1;font-weight:bold;color:#f2b705;letter-spacing:-.02em">' + title + '</div>' +
+    '<div style="margin-top:16px;font-size:16px;line-height:1.5;color:#f4f1e8">' + line + '</div></td></tr>';
+}
+
+// A bar filled to pct (0-100).
+function meter_(pct, fill, track, height, top, radius) {
+  var p = Math.max(0, Math.min(100, Math.round(pct)));
+  var cell = 'height:' + height + 'px;font-size:0;line-height:0';
+  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="' + (top ? 'margin-top:' + top + 'px;' : '') +
+    'border-radius:' + radius + 'px;overflow:hidden"><tr>' +
+    (p > 0 ? '<td width="' + p + '%" style="' + cell + ';background:' + fill + '">&nbsp;</td>' : '') +
+    (p < 100 ? '<td style="' + cell + ';background:' + track + '">&nbsp;</td>' : '') +
+    '</tr></table>';
+}
+
+// The row of three figures under the header: [{ value, label }].
+function statsRow_(items) {
+  var cells = [];
+  for (var i = 0; i < items.length; i++) {
+    cells.push('<td' + (i ? ' class="sc"' : '') + ' width="' + (i ? '33%' : '34%') + '" valign="top" style="padding:22px 0' + (i ? ' 22px 20px;border-left:' + EM_RULE : '') + '">' +
+      '<div class="sn" style="font-size:28px;line-height:1.1;font-weight:bold;' + EM_NUM + '">' + items[i].value + '</div>' +
+      '<div style="font-size:13px;color:' + EM_MUTED + ';margin-top:5px">' + items[i].label + '</div></td>');
+  }
+  return '<tr><td style="padding:0 ' + EM_PAD + ';border-bottom:' + EM_RULE + '"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' +
+    cells.join('') + '</tr></table></td></tr>';
+}
+
+// "Long text" cut at a word to about n characters, with an ellipsis.
+function clip_(text, n) {
+  var t = String(text || '').replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, '');
+  if (t.length <= n) return t;
+  var cut = t.slice(0, n - 1).replace(/\s+\S*$/, '');
+  return (cut || t.slice(0, n - 1)) + '…';
+}
+
+// A section title (20 px) with an optional figure on the right. top: space above (34 for the first section, else 36);
+// list: true for the task lists, whose rows start with their own rule (less space below).
+function sectionHead_(title, aside, top, list) {
+  var pad = 'padding:' + top + 'px ' + EM_PAD + ' ' + (list ? '6px' : '14px');
+  if (!aside) return '<tr><td style="' + pad + '"><div style="font-size:20px;line-height:1.3;font-weight:bold">' + title + '</div></td></tr>';
+  return '<tr><td style="' + pad + '"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' +
+    '<td style="font-size:20px;line-height:1.3;font-weight:bold">' + title + '</td>' +
+    '<td align="right" style="font-size:14px;font-weight:bold;color:' + EM_MUTED + ';white-space:nowrap;' + EM_NUM + '">' + aside + '</td>' +
+    '</tr></table></td></tr>';
+}
+
+function sectionBody_(html) {
+  return '<tr><td style="padding:0 ' + EM_PAD + '">' + html + '</td></tr>';
+}
+
+function chip_(color, size, gap) {
+  return '<span style="display:inline-block;width:' + size + 'px;height:' + size + 'px;border-radius:2px;background:' + safeColor_(color) +
+    ';margin-right:' + gap + 'px"></span>';
+}
+
+// Time per project: one bar split by project (two or more projects), and the legend with each project's time.
+function splitBar_(groups) {
+  var total = 0;
+  for (var i = 0; i < groups.length; i++) total += num_(groups[i].minutes);
+  if (total <= 0) return '';
+  var cells = [];
+  var legend = [];
+  for (var g = 0; g < groups.length; g++) {
+    var w = Math.max(1, Math.round((num_(groups[g].minutes) / total) * 100));
+    cells.push('<td width="' + w + '%" style="height:12px;font-size:0;line-height:0;background:' + safeColor_(groups[g].color) +
+      (g > 0 ? ';border-left:2px solid #ffffff' : '') + '">&nbsp;</td>');
+    legend.push('<span style="display:inline-block;margin:0 22px 8px 0;white-space:nowrap;font-size:14px">' + chip_(groups[g].color, 10, 8) +
+      esc_(groups[g].name) + '<span style="color:' + EM_MUTED + ';margin-left:8px;font-weight:bold;' + EM_NUM + '">' + esc_(fmtHM_(groups[g].minutes)) + '</span></span>');
+  }
+  var bar = groups.length < 2 ? '' : '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-radius:6px;overflow:hidden;margin-bottom:16px"><tr>' +
+    cells.join('') + '</tr></table>';
+  // A line break between items, as in the references: it renders as the small space between them.
+  return bar + '<div>' + legend.join('\n') + '</div>';
+}
+
+// The logs in short (evening email, no standup): one line each, its project's colour, its minutes. No sub-tasks.
+function compactLogs_(groups) {
+  var rows = [];
+  for (var g = 0; g < groups.length; g++) {
+    for (var k = 0; k < groups[g].logs.length; k++) {
+      var lg = groups[g].logs[k];
+      rows.push('<tr><td width="20" valign="top" style="padding:15px 0;border-top:' + EM_RULE + '"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:' +
+        safeColor_(groups[g].color) + ';margin-top:5px"></span></td>' +
+        '<td valign="top" style="padding:14px 12px 14px 0;border-top:' + EM_RULE + ';font-size:15px;line-height:1.55">' + esc_(clip_(lg.description, 110)) + '</td>' +
+        '<td valign="top" align="right" style="padding:14px 0;border-top:' + EM_RULE + ';font-size:14px;font-weight:bold;line-height:1.55;white-space:nowrap;' + EM_NUM + '">' +
+        esc_(fmtHM_(num_(lg.minutes))) + '</td></tr>');
+    }
+  }
+  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px">' + rows.join('') + '</table>';
+}
+
+// A stage as a pill: amber for paused and in progress, red for blocked.
+function stagePill_(task) {
   var note = stageNote_(task);
-  var tracked = num_(task.trackedMinutes) > 0 ? esc_(fmtHM_(num_(task.trackedMinutes))) : '';
-  return listRow_(task.color, null,
-    '<div style="font-size:14px;line-height:1.45;color:#1d2b24">' + esc_(task.title) + '</div>' +
-      rowMeta_([withProject ? esc_(task.project || '') : '', note ? esc_(note) : ''], false),
-    tracked ? tracked + '<div style="font-size:12px;font-weight:normal;color:#5d6b63">tracked</div>' : '');
+  if (!note) return '';
+  var bad = task.stage === 'blocked';
+  return '<span style="display:inline-block;padding:1px 9px;border-radius:10px;background:' + (bad ? '#fbe4e4' : '#fdf0dc') + ';color:' + (bad ? '#a8252c' : '#7a3e0c') +
+    ';font-size:12px;font-weight:bold">' + esc_(note) + '</span>';
 }
 
-function footerRow_(footer, sheetUrl) {
-  return '<tr><td style="padding:22px 24px 20px;font-size:12px;color:#5d6b63;border-top:1px solid #dcd8cb">' + esc_(footer) +
-    (sheetUrl ? ' <a href="' + esc_(sheetUrl) + '" style="color:#0f3d2e">Open your WorkPulse Sheet</a>' : '') + '</td></tr>';
+// A task row: a mark (done check, open ring), the title, then its project, when it was due (open tasks) and its stage pill;
+// tracked time on the right.
+function taskRow_(task, done, dueLabel) {
+  var tracked = num_(task.trackedMinutes) > 0 ? esc_(fmtHM_(num_(task.trackedMinutes))) : '';
+  var gap = '<span style="display:inline-block;width:12px"></span>';
+  var meta = [];
+  if (task.project) meta.push(chip_(task.color, 8, 7) + esc_(task.project));
+  if (dueLabel) meta.push(esc_(dueLabel));
+  var pill = stagePill_(task);
+  if (pill) meta.push(pill);
+  var rule = 'border-top:' + EM_RULE;
+  return '<tr><td width="28" valign="top" style="padding:14px 0;' + rule + ';font-size:15px;line-height:1.5;' +
+    (done ? 'font-weight:bold;color:' + EM_OK + '">&#10003;' : 'color:' + EM_FAINT + '">&#9675;') + '</td>' +
+    '<td valign="top" style="padding:14px 12px 14px 0;' + rule + '"><div style="font-size:15px;line-height:1.5;font-weight:600">' + esc_(task.title) + '</div>' +
+    (meta.length ? '<div style="font-size:13px;line-height:1.9;color:' + EM_MUTED + ';margin-top:2px">' + meta.join(gap) + '</div>' : '') + '</td>' +
+    (tracked
+      ? '<td valign="top" align="right" style="padding:14px 0;' + rule + ';font-size:14px;font-weight:bold;line-height:1.5;color:' + EM_INK + ';white-space:nowrap;' + EM_NUM + '">' +
+        tracked + '<div style="font-size:12px;line-height:1.2;font-weight:normal;color:' + EM_MUTED + '">tracked</div></td>'
+      : '<td valign="top" align="right" style="padding:14px 0;' + rule + '">&nbsp;</td>') + '</tr>';
+}
+
+function emptyNote_(text) {
+  return '<div style="padding:14px 0;border-top:' + EM_RULE + ';font-size:15px;color:' + EM_MUTED + '">' + esc_(text) + '</div>';
+}
+
+// The standup in its card. colors: { 'k' + project name in lower case: '#hex' } for the project labels.
+function standupPanel_(text, colors) {
+  return '<div class="card" style="background:' + EM_TINT + ';border-radius:10px;padding:24px 24px">' + standupHtml_(text, colors) + '</div>';
+}
+
+// { 'k' + name in lower case: colour } from a project list.
+function projectColors_(projects) {
+  var out = {};
+  for (var i = 0; i < (projects || []).length; i++) out['k' + String(projects[i].name).toLowerCase()] = projects[i].color;
+  return out;
+}
+
+// The footer: a spacer, then the data line (green dot when the PC sent data that day), the footer text, the Sheet link.
+function footerRow_(footer, sheetUrl, dataLine, dataOk, space) {
+  return '<tr><td style="padding:' + (space || 36) + 'px ' + EM_PAD + ' 0"></td></tr>' +
+    '<tr><td style="padding:22px ' + EM_PAD + ' 28px;border-top:' + EM_RULE + ';font-size:13px;line-height:1.7;color:' + EM_MUTED + '">' +
+    (dataLine ? '<div style="margin-bottom:8px;color:' + EM_INK + '"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:' +
+      (dataOk ? EM_OK : EM_WARN) + ';margin-right:8px"></span>' + esc_(dataLine) + '</div>' : '') +
+    esc_(footer) +
+    (sheetUrl ? '<br><a href="' + esc_(sheetUrl) + '" style="display:inline-block;margin-top:10px;color:#0f3d2e;font-weight:bold">Open your WorkPulse Sheet &rarr;</a>' : '') +
+    '</td></tr>';
 }
 
 // ---- Standup text (chat-style marks: *bold*, **bold**, _italic_, "- " or "• " bullets, bold-only lines as headings) ----
@@ -1133,198 +1330,269 @@ function standupInline_(s) {
     .replace(/(^|[^A-Za-z0-9_])_([^_\s][^_\n]*?)_(?![A-Za-z0-9_])/g, '$1<i>$2</i>');
 }
 
-// The lines as blocks: { k: 'h', text } heading, { k: 'g', label, items } one project's bullets, { k: 'b', text } bullet,
-// { k: 'l', text } line, { k: 'gap' }. Inside a section, bullets that start with "*project:*" are gathered into one group per
-// project, in the order each first appears, where the first of them was.
-function standupBlocks_(text) {
+// The standup read into its structure. The SAME rules as parseStandup in src/utils/standupDoc.ts (the app): a test runs
+// both on the same samples. Returns [{ title, kind: 'done'|'doing'|'blocked'|'other', items: [ { kind: 'project', label,
+// points: [{ text, subs }] } | { kind: 'point', point: { text, subs } } | { kind: 'line', text } ] }].
+// Format: a bold-only line (or "# ...") is a heading; "- *project:* text" a point of that project; an indented "  - text"
+// a sub-point of the point above. Points of the same project in a section are gathered, in the order each first appears.
+function standupDoc_(text) {
+  var sections = [];
+  var cur = null;
+  var last = null;
   var lines = String(text).replace(/\r\n?/g, '\n').split('\n');
-  var out = [];
-  var groups = null;
-  var at = 0;
-  function close() {
-    if (!groups) return;
-    var made = [];
-    for (var g = 0; g < groups.order.length; g++) made.push(groups.map['k' + groups.order[g]]);
-    out.splice.apply(out, [at, 0].concat(made));
-    groups = null;
+  function section() {
+    if (!cur) {
+      cur = { title: '', kind: 'other', items: [] };
+      sections.push(cur);
+    }
+    return cur;
   }
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
-    if (/^\s*$/.test(line)) {
-      if (!groups) out.push({ k: 'gap' });
+    if (/^\s*$/.test(line)) continue;
+    var bullet = /^(\s*)([-•]|\d{1,2}[.)])\s+(.+)$/.exec(line);
+    var trimmed = line.replace(/^\s+|\s+$/g, '');
+    var h = /^#{1,3}\s+(.+)$/.exec(trimmed);
+    var bold = /^\*{1,2}([^*\n]+?)\*{1,2}\s*$/.exec(line.replace(/^[^A-Za-z0-9*#ঀ-৿]+/, '').replace(/^\s+|\s+$/g, ''));
+    if (h || (bold && !bullet)) {
+      var title = (h ? h[1] : bold[1]).replace(/^\s+|\s+$/g, '');
+      cur = { title: title, kind: sectionKind_(title), items: [] };
+      sections.push(cur);
+      last = null;
       continue;
     }
-    var hm = /^#{1,3}\s+(.+)$/.exec(line);
-    // A line that is only a bold phrase, maybe after an emoji or symbol, is a heading; the symbol is dropped.
-    var bold = /^\*{1,2}([^*\n]+?)\*{1,2}\s*$/.exec(line.replace(/^[\s -⯿\ud800-\udfff️‍]+/, ''));
-    var bm = /^\s*([-•]|\d{1,2}[.)])\s+(.+)$/.exec(line);
-    if (hm || (bold && !bm)) {
-      close();
-      out.push({ k: 'h', text: hm ? hm[1] : bold[1] });
-      continue;
-    }
-    if (bm) {
-      var tag = /^\*{1,2}([^*\n]+?):\*{1,2}\s*(.*)$/.exec(bm[2]);
-      if (tag && tag[1].replace(/\s+/g, '') !== '') {
-        if (!groups) {
-          groups = { order: [], map: {} };
-          at = out.length;
-        }
-        var key = tag[1].replace(/^\s+|\s+$/g, '').toLowerCase();
-        if (!groups.map.hasOwnProperty('k' + key)) {
-          groups.order.push(key);
-          groups.map['k' + key] = { k: 'g', label: tag[1].replace(/^\s+|\s+$/g, ''), items: [] };
-        }
-        groups.map['k' + key].items.push(tag[2]);
+    var sec = section();
+    if (bullet) {
+      var content = bullet[3].replace(/^\s+|\s+$/g, '');
+      if (bullet[1].replace(/\t/g, '  ').length >= 2 && last) {
+        last.subs.push(content);
         continue;
       }
-      out.push({ k: 'b', text: bm[2] });
+      var tag = /^\*{1,2}([^*\n]+?):\*{1,2}\s*(.*)$/.exec(content);
+      var label = tag ? tag[1].replace(/^\s+|\s+$/g, '') : '';
+      var point;
+      if (tag && label) {
+        point = { text: tag[2].replace(/^\s+|\s+$/g, ''), subs: [] };
+        var group = null;
+        for (var g = 0; g < sec.items.length; g++) {
+          if (sec.items[g].kind === 'project' && sec.items[g].label.toLowerCase() === label.toLowerCase()) group = sec.items[g];
+        }
+        if (group) group.points.push(point);
+        else sec.items.push({ kind: 'project', label: label, points: [point] });
+      } else {
+        point = { text: content, subs: [] };
+        sec.items.push({ kind: 'point', point: point });
+      }
+      last = point;
       continue;
     }
-    out.push({ k: 'l', text: line });
+    sec.items.push({ kind: 'line', text: trimmed });
+    last = null;
   }
-  close();
-  return out;
+  return sections;
 }
 
-function bulletRow_(inlineHtml) {
-  return '<tr><td valign="top" style="width:16px;padding:2px 0;font-size:14px;color:#5d6b63">&bull;</td>' +
-    '<td style="padding:2px 0;font-size:14px;line-height:1.5">' + inlineHtml + '</td></tr>';
+// What a heading announces: work done, work going on, or something stuck (sectionKind in standupDoc.ts).
+function sectionKind_(title) {
+  if (/block|waiting|stuck|risk/i.test(title)) return 'blocked';
+  if (/progress|rolling|next|plan|tomorrow|ongoing/i.test(title)) return 'doing';
+  if (/complet|done|finish|shipped/i.test(title)) return 'done';
+  return 'other';
 }
 
-function standupHtml_(text) {
-  var blocks = standupBlocks_(text);
+var SECTION_DOT = { done: EM_OK, doing: EM_WARN, blocked: EM_BAD, other: '#0f3d2e' };
+
+function isNothing_(text) {
+  return /^\s*(none|nothing|n\/a|-)\.?\s*$/i.test(String(text).replace(/\*/g, ''));
+}
+
+// One point: "•", its text (quieter when it only says "None"), and its sub-points under it with "–".
+function standupPointHtml_(point) {
+  var subs = '';
+  for (var i = 0; i < point.subs.length; i++) {
+    subs += '<tr><td valign="top" style="width:16px;font-size:14px;line-height:1.6;color:' + EM_MUTED + '">&ndash;</td>' +
+      '<td style="font-size:14px;line-height:1.6;color:' + EM_MUTED + '">' + standupInline_(point.subs[i]) + '</td></tr>';
+  }
+  return '<tr><td valign="top" style="width:18px;padding:5px 0;font-size:15px;line-height:1.6;color:' + EM_FAINT + '">&bull;</td>' +
+    '<td style="padding:5px 0;font-size:15px;line-height:1.6' + (isNothing_(point.text) ? ';color:' + EM_MUTED : '') + '">' + standupInline_(point.text) +
+    (subs ? '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0 2px">' + subs + '</table>' : '') + '</td></tr>';
+}
+
+function standupPoints_(points) {
+  var rows = [];
+  for (var p = 0; p < points.length; p++) rows.push(standupPointHtml_(points[p]));
+  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:6px">' + rows.join('') + '</table>';
+}
+
+// The standup, read by standupDoc_: each section's title with a dot for its kind (the closing colon is not shown), each
+// project as an uppercase label in its colour, its points with "•", sub-points with "–". A thin rule between sections.
+// colors: from projectColors_.
+function standupHtml_(text, colors) {
+  colors = colors || {};
+  var doc = standupDoc_(text);
   var h = [];
-  for (var i = 0; i < blocks.length; i++) {
-    var b = blocks[i];
-    var first = h.length === 0;
-    if (b.k === 'gap') {
-      if (!first) h.push('<div style="height:6px"></div>');
-    } else if (b.k === 'h') {
-      h.push('<div style="font-size:15px;font-weight:bold;margin:' + (first ? '0' : '12px') + ' 0 4px">' + standupInline_(b.text) + '</div>');
-    } else if (b.k === 'g') {
-      h.push('<div style="font-size:14px;font-weight:bold;color:#0f3d2e;margin:' + (first ? '0' : '8px') + ' 0 2px 4px">' + esc_(b.label) + '</div>');
-      var rows = [];
-      for (var j = 0; j < b.items.length; j++) rows.push(bulletRow_(standupInline_(b.items[j])));
-      h.push('<table role="presentation" cellpadding="0" cellspacing="0" style="margin-left:14px">' + rows.join('') + '</table>');
-    } else if (b.k === 'b') {
-      h.push('<table role="presentation" cellpadding="0" cellspacing="0" style="margin-left:4px">' + bulletRow_(standupInline_(b.text)) + '</table>');
-    } else {
-      h.push('<div style="font-size:14px;line-height:1.5">' + standupInline_(b.text) + '</div>');
+  for (var s = 0; s < doc.length; s++) {
+    var sec = doc[s];
+    h.push(s > 0 ? '<div style="border-top:1px solid #e3ddcd;margin-top:24px;padding-top:24px">' : '<div>');
+    if (sec.title) {
+      h.push('<div style="font-size:16px;line-height:1.4;font-weight:bold"><span style="display:inline-block;width:9px;height:9px;border-radius:5px;background:' +
+        SECTION_DOT[sec.kind] + ';margin-right:10px;vertical-align:1px"></span>' + standupInline_(sec.title.replace(/\s*:\s*$/, '')) + '</div>');
     }
+    for (var i = 0; i < sec.items.length; i++) {
+      var it = sec.items[i];
+      var top = sec.title || i > 0 ? '16px' : '0';
+      if (it.kind === 'project') {
+        var color = colors['k' + it.label.toLowerCase()];
+        h.push('<div style="margin-top:' + top + ';font-size:12px;letter-spacing:.1em;text-transform:uppercase;font-weight:bold">' +
+          (color ? chip_(color, 9, 8) : '') + esc_(it.label) + '</div>' + standupPoints_(it.points));
+      } else if (it.kind === 'point') {
+        h.push('<div style="margin-top:' + (sec.title || i > 0 ? '10px' : '0') + '">' + standupPoints_([it.point]) + '</div>');
+      } else {
+        h.push('<div style="margin-top:' + (sec.title || i > 0 ? '10px' : '0') + ';font-size:15px;line-height:1.6">' + standupInline_(it.text) + '</div>');
+      }
+    }
+    h.push('</div>');
   }
   return h.join('');
 }
 
-// The standup for the plain-text body: the same grouping, with the marks taken out.
+// The standup for the plain-text body: the same structure, with the marks taken out.
 function standupPlain_(text) {
   function bare(s) {
     return plain_(String(s).replace(/\*\*?([^*\n]+?)\*\*?/g, '$1'));
   }
-  var blocks = standupBlocks_(text);
+  function point(p, t) {
+    t.push('  - ' + bare(p.text));
+    for (var i = 0; i < p.subs.length; i++) t.push('      - ' + bare(p.subs[i]));
+  }
+  var doc = standupDoc_(text);
   var t = [];
-  for (var i = 0; i < blocks.length; i++) {
-    var b = blocks[i];
-    if (b.k === 'gap') t.push('');
-    else if (b.k === 'h') t.push(bare(b.text).toUpperCase());
-    else if (b.k === 'g') {
-      t.push(plain_(b.label));
-      for (var j = 0; j < b.items.length; j++) t.push('  - ' + bare(b.items[j]));
-    } else if (b.k === 'b') t.push('  - ' + bare(b.text));
-    else t.push(bare(b.text));
+  for (var s = 0; s < doc.length; s++) {
+    if (s > 0) t.push('');
+    if (doc[s].title) t.push(bare(doc[s].title).toUpperCase());
+    for (var i = 0; i < doc[s].items.length; i++) {
+      var it = doc[s].items[i];
+      if (it.kind === 'project') {
+        t.push(plain_(it.label));
+        for (var p = 0; p < it.points.length; p++) point(it.points[p], t);
+      } else if (it.kind === 'point') point(it.point, t);
+      else t.push(bare(it.text));
+    }
   }
   return t.join('\n');
 }
 
 function emailHtml_(m) {
   var h = [];
-  h.push('<tr><td style="background:#0f3d2e;color:#f4f1e8;padding:18px 24px">');
-  h.push('<div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#afbbb0;font-weight:bold">' + esc_(m.dayLong) + '</div>');
+  var preview;
   if (m.noData) {
-    h.push('<div style="font-size:30px;font-weight:bold;color:#f2b705;margin-top:6px;line-height:1">No data yet</div>');
-    h.push('<div style="font-size:14px;margin-top:8px;color:#f4f1e8">Nothing logged and no clock-in so far today.</div>');
+    h.push(headerEmptyRow_(esc_(m.dayLong), 'No data yet', 'Nothing logged and no clock-in so far today.'));
+    preview = 'No data yet today.';
   } else {
-    h.push('<div style="font-size:38px;font-weight:bold;color:#f2b705;margin-top:6px;line-height:1">' + esc_(fmtHM_(m.worked)) +
-      ' <span style="font-size:15px;color:#f4f1e8;font-weight:normal">worked of ' + esc_(fmtHM_(m.target)) + '</span></div>');
-    h.push('<div style="font-size:14px;margin-top:8px;color:#f4f1e8">' + esc_(m.clockLine).replace(/ \u00b7 /g, ' &nbsp;&middot;&nbsp; ') + '</div>');
+    var over = m.worked - m.target;
+    // The clock line ("In 08:40 · Out 16:19", "In 09:10 · still clocked in", "not clocked in") as labelled cells.
+    var parts = String(m.clockLine).split(' · ');
+    var cells = [];
+    var line = '';
+    if (/^In /.test(parts[0])) {
+      cells.push({ label: 'In', value: esc_(parts[0].slice(3)) });
+      if (parts[1]) cells.push(/^Out /.test(parts[1]) ? { label: 'Out', value: esc_(parts[1].slice(4)) } : { label: 'Out', value: esc_(parts[1]), open: true });
+    } else {
+      line = esc_(m.clockLine);
+    }
+    h.push(headerRow_(esc_(m.dayLong), esc_(fmtHM_(m.worked)),
+      over > 0 ? 'worked, ' + esc_(fmtHM_(over)) + ' over ' + esc_(fmtHM_(m.target)) : 'worked of ' + esc_(fmtHM_(m.target)),
+      m.target > 0 ? (m.worked / m.target) * 100 : 0, cells, line));
+    h.push(statsRow_([
+      { value: esc_(fmtHM_(m.logMinutes)), label: m.logCount === 1 ? 'logged in 1 entry' : 'logged in ' + m.logCount + ' entries' },
+      { value: String(m.done.length), label: m.done.length === 1 ? 'task done' : 'tasks done' },
+      { value: String(m.openCount), label: 'still open' }
+    ]));
+    preview = fmtHM_(m.worked) + ' worked of ' + fmtHM_(m.target) + ', ' + m.done.length + ' done, ' + m.openCount + ' still open';
   }
-  h.push('</td></tr>');
 
-  h.push('<tr><td style="padding:6px 24px 0"><div style="font-size:12px;color:#5d6b63;padding:10px 0;border-bottom:1px solid #dcd8cb">' + esc_(m.dataLine) + '</div></td></tr>');
-
+  var top = 34;
   if (m.standup) {
-    h.push('<tr><td style="padding:16px 24px 4px"><div style="' + EM_LABEL + '">Standup</div></td></tr>');
-    h.push('<tr><td style="padding:0 24px"><div style="border-top:2px solid #1d2b24;padding-top:10px;color:#1d2b24">' + standupHtml_(m.standup) + '</div></td></tr>');
+    h.push(sectionHead_('Standup', '', top, false));
+    h.push(sectionBody_(standupPanel_(m.standup, m.projectColors)));
+    top = 36;
   }
 
-  h.push('<tr><td style="padding:' + (m.standup ? '24px' : '16px') + ' 24px 4px"><div style="' + EM_LABEL + '">Logs &middot; ' + m.logCount + ' &middot; ' + esc_(fmtHM_(m.logMinutes)) + '</div></td></tr>');
-  // Logs as in WorkPulse's History: one row each, by time, with the time, the project's colour bar, the text, the
-  // project under it, the sub-tasks, and the minutes on the right; a thin line between rows.
-  h.push('<tr><td style="padding:0 24px">');
-  var flat = [];
-  for (var g = 0; g < m.groups.length; g++) {
-    for (var k = 0; k < m.groups[g].logs.length; k++) flat.push({ log: m.groups[g].logs[k], name: m.groups[g].name, color: m.groups[g].color });
+  // With a standup the logs are already summed up: only the time per project shows. Without one, a short line per log.
+  if (m.groups.length) {
+    h.push(sectionHead_(m.standup ? 'Time by project' : 'Logs', esc_(fmtHM_(m.logMinutes)), top, false));
+    h.push(sectionBody_(splitBar_(m.groups) + (m.standup ? '' : compactLogs_(m.groups))));
+    top = 36;
+  } else if (!m.noData) {
+    h.push(sectionHead_('Logs', '', top, true));
+    h.push(sectionBody_(emptyNote_('No logs yet today.')));
+    top = 36;
   }
-  flat.sort(function (a, b) {
-    var x = String(a.log.time || '');
-    var y = String(b.log.time || '');
-    return x < y ? -1 : x > y ? 1 : 0;
-  });
-  if (flat.length === 0) {
-    h.push('<div style="border-top:2px solid #1d2b24;padding-top:8px;font-size:14px;color:#5d6b63">No logs yet today.</div>');
-  } else {
-    // Time per project, biggest first, before the rows.
-    var totals = [];
-    for (var t = 0; t < m.groups.length; t++) {
-      totals.push('<span style="display:inline-block;margin:0 16px 4px 0;white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;background:' +
-        safeColor_(m.groups[t].color) + ';margin-right:6px"></span>' + esc_(m.groups[t].name) + ' <span style="font-weight:bold">' + esc_(fmtHM_(m.groups[t].minutes)) + '</span></span>');
-    }
-    h.push('<div style="font-size:13px;color:#1d2b24;padding:2px 0 6px">' + totals.join('') + '</div>');
-    h.push('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:2px solid #1d2b24">');
-    for (var f = 0; f < flat.length; f++) {
-      var lg = flat[f].log;
-      var subs = lg.subTasks || [];
-      var subHtml = '';
-      for (var su = 0; su < subs.length; su++) {
-        subHtml += '<div style="font-size:13px;line-height:1.5;color:#5d6b63;padding-left:12px">&ndash; ' + esc_(subs[su]) + '</div>';
+
+  // With a standup the done tasks are already in it (it is written from logs and done tasks together): no second list.
+  if (m.done.length && !m.standup) {
+    var done = [];
+    for (var d = 0; d < m.done.length; d++) done.push(taskRow_(m.done[d], true, ''));
+    h.push(sectionHead_('Done today', String(m.done.length), top, true));
+    h.push(sectionBody_('<table role="presentation" width="100%" cellpadding="0" cellspacing="0">' + done.join('') + '</table>'));
+    top = 36;
+  }
+
+  if (m.openCount) {
+    var open = [];
+    var shown = 0;
+    for (var o = 0; o < m.openGroups.length && shown < EM_OPEN_MAX; o++) {
+      for (var q = 0; q < m.openGroups[o].tasks.length && shown < EM_OPEN_MAX; q++) {
+        open.push(taskRow_(m.openGroups[o].tasks[q], false, m.openGroups[o].label));
+        shown++;
       }
-      h.push(listRow_(flat[f].color, esc_(lg.time || ''),
-        '<div style="font-size:14px;line-height:1.45;color:#1d2b24">' + esc_(lg.description) + '</div>' +
-          rowMeta_([esc_(flat[f].name), subs.length ? subs.length + (subs.length === 1 ? ' sub-task' : ' sub-tasks') : ''], subs.length > 0) + subHtml,
-        esc_(fmtHM_(num_(lg.minutes)))));
     }
-    h.push('</table>');
-  }
-  h.push('</td></tr>');
-
-  h.push('<tr><td style="padding:22px 24px 4px"><div style="' + EM_LABEL + '">Tasks done today &middot; ' + m.done.length + '</div>');
-  if (m.done.length === 0) {
-    h.push('<div style="border-top:2px solid #1d2b24;margin-top:6px;font-size:14px;padding-top:8px;color:#5d6b63">None yet.</div>');
-  } else {
-    h.push('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:2px solid #1d2b24;margin-top:6px">');
-    for (var d = 0; d < m.done.length; d++) h.push(taskRow_(m.done[d], true));
-    h.push('</table>');
-  }
-  h.push('</td></tr>');
-
-  h.push('<tr><td style="padding:18px 24px 4px"><div style="' + EM_LABEL + '">Still open &middot; ' + m.openCount + '</div>');
-  if (m.openGroups.length === 0) {
-    h.push('<div style="border-top:2px solid #1d2b24;margin-top:6px;padding-top:8px;font-size:14px;color:#5d6b63">Nothing open.</div>');
-  } else {
-    h.push('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:2px solid #1d2b24;margin-top:6px">');
-    for (var o = 0; o < m.openGroups.length; o++) {
-      h.push('<tr><td colspan="2" style="padding:14px 0 4px;font-size:13px;font-weight:bold;color:#1d2b24;border-bottom:' + EM_RULE + '">' + esc_(m.openGroups[o].label) + '</td></tr>');
-      for (var q = 0; q < m.openGroups[o].tasks.length; q++) h.push(taskRow_(m.openGroups[o].tasks[q], true));
-    }
-    h.push('</table>');
+    var more = m.openCount - shown;
+    h.push(sectionHead_('Still open', String(m.openCount), top, true));
+    h.push(sectionBody_('<table role="presentation" width="100%" cellpadding="0" cellspacing="0">' + open.join('') + '</table>' +
+      (more > 0 ? '<div style="padding:12px 0 0;border-top:' + EM_RULE + ';font-size:14px;color:' + EM_MUTED + '">and ' + more + ' more on your Plan</div>' : '')));
   }
   if (m.pendingLine) {
-    h.push('<div style="font-size:13px;color:#7a5a00;margin-top:8px;font-weight:bold">' + esc_(m.pendingLine) + '</div>');
+    h.push(sectionBody_('<div style="margin-top:16px;padding:12px 16px;background:#fdf0dc;border-radius:8px;font-size:14px;color:#7a3e0c">' + esc_(m.pendingLine) + '</div>'));
   }
-  h.push('</td></tr>');
 
-  h.push(footerRow_(m.footer, m.sheetUrl));
-  return emailShell_(h.join(''));
+  h.push(footerRow_(m.footer, m.sheetUrl, m.dataLine, m.dataOk, m.noData ? 32 : 36));
+  return emailShell_(h.join(''), preview);
+}
+
+// The week standup: the week's hours with a bar per day, the standup, and time per project; the data line in the footer.
+// w = { range, worked, target, perDay, days: [{ label, worked, open, off }], dayCount, openCount, dataLine, dataOk, standup,
+// projectColors, groups, logMinutes, footer, sheetUrl }
+function weekEmailHtml_(w) {
+  var h = [];
+  var over = w.worked - w.target;
+  h.push(headerRow_('Week standup &middot; ' + esc_(w.range), esc_(fmtHM_(w.worked)),
+    over > 0 ? 'worked, ' + esc_(fmtHM_(over)) + ' over ' + esc_(fmtHM_(w.target)) : 'worked of ' + esc_(fmtHM_(w.target)),
+    w.target > 0 ? (w.worked / w.target) * 100 : 0, null,
+    w.dayCount + (w.dayCount === 1 ? ' day at work' : ' days at work') + (w.openCount ? ', ' + w.openCount + ' without a clock-out' : '')));
+  h.push(sectionHead_('Day by day', '', 34, false));
+  var top = 1;
+  for (var i = 0; i < w.days.length; i++) top = Math.max(top, w.days[i].worked, w.perDay);
+  var rows = [];
+  for (var d = 0; d < w.days.length; d++) {
+    var day = w.days[d];
+    rows.push('<tr><td width="72" style="padding:9px 0;font-size:14px;' + (day.off ? 'color:' + EM_FAINT : 'font-weight:600') + ';white-space:nowrap">' + esc_(day.label) + '</td>' +
+      '<td style="padding:9px 14px">' + (day.off ? '<div style="height:1px;background:' + EM_LINE + '"></div>' : meter_((day.worked / top) * 100, day.open ? EM_WARN : '#0f3d2e', '#efebe1', 12, 0, 10)) + '</td>' +
+      '<td width="56" align="right" style="padding:9px 0;font-size:14px;font-weight:bold;' + (day.off ? 'color:' + EM_FAINT : EM_NUM) + '">' +
+      (day.off ? '&ndash;' : day.open ? 'open' : esc_(fmtHM_(day.worked))) + '</td></tr>');
+  }
+  h.push(sectionBody_('<table role="presentation" width="100%" cellpadding="0" cellspacing="0">' + rows.join('') + '</table>'));
+
+  if (w.standup) {
+    h.push(sectionHead_('Standup', '', 36, false));
+    h.push(sectionBody_(standupPanel_(w.standup, w.projectColors)));
+  }
+  if (w.groups.length) {
+    h.push(sectionHead_('Time by project', esc_(fmtHM_(w.logMinutes)), 36, false));
+    h.push(sectionBody_(splitBar_(w.groups)));
+  }
+  h.push(footerRow_(w.footer, w.sheetUrl, w.dataLine, w.dataOk, 36));
+  return emailShell_(h.join(''), fmtHM_(w.worked) + ' worked over ' + w.dayCount + (w.dayCount === 1 ? ' day' : ' days'));
 }
 
 // ---- Plain text ----
