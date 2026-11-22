@@ -31,3 +31,12 @@ describe('Apps Script permissions', () => {
     }
   });
 });
+
+describe('script version label', () => {
+  it('the heading names the same version the script reports', () => {
+    const declared = /var SCRIPT_VERSION = (\d+);/.exec(GOOGLE_APPS_SCRIPT_CODE)?.[1];
+    const heading = /Google Sheets Sync Backend \(version (\d+)\)/.exec(GOOGLE_APPS_SCRIPT_CODE)?.[1];
+    expect(declared).toBeDefined();
+    expect(heading).toBe(declared);
+  });
+});
