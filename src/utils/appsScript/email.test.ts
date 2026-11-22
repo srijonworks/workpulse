@@ -81,7 +81,7 @@ describe('evening email: recipients', () => {
 });
 
 describe('evening email: content', () => {
-  it('lists the sub-tasks of each log and the project and tracked time of each task', () => {
+  it('lists the sub-tasks of each log in the plain-text body only', () => {
     const logs = [{ ...MOCKUP_LOGS[0], subTasks: ['Filter by team', 'Fix <b>timezone</b>'] }, ...MOCKUP_LOGS.slice(1)];
     const { h } = evening({ logs });
     h.run('sendEveningEmail');
@@ -89,8 +89,6 @@ describe('evening email: content', () => {
     // The HTML stays short: sub-tasks are only in the plain-text body.
     expect(html).not.toContain('Filter by team');
     expect(text).toContain('      - Filter by team');
-    expect(html).toMatch(/Deploy suggestions build<\/div>[^]*BGB Portal[^]*0:30<div[^>]*>tracked</);
-    expect(text).toContain('Deploy suggestions build · BGB Portal · 0:30 tracked');
   });
 
   it('has the exact subject for 5 logs and 484 minutes', () => {
@@ -116,8 +114,8 @@ describe('evening email: content', () => {
     expect(html).toContain('>Logs<');
     expect(html).toContain('logged in 5 entries');
     expect(html).toContain('Built attendance report filters and fixed the timezone bug');
-    expect(html).toMatch(/>Done today<\/td><td[^>]*>1</);
-    expect(html).toContain('Deploy suggestions build');
+    expect(html).not.toContain('>Done today<');
+    expect(text).not.toContain('TASKS DONE TODAY');
     expect(html).not.toContain('Finished long ago');
     expect(html).toMatch(/>Still open<\/td><td[^>]*>3</);
     expect(html).toContain('Sent by your WorkPulse script at 18:00 (Asia/Dhaka)');

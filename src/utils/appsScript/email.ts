@@ -1529,15 +1529,6 @@ function emailHtml_(m) {
     top = 36;
   }
 
-  // With a standup the done tasks are already in it (it is written from logs and done tasks together): no second list.
-  if (m.done.length && !m.standup) {
-    var done = [];
-    for (var d = 0; d < m.done.length; d++) done.push(taskRow_(m.done[d], true, ''));
-    h.push(sectionHead_('Done today', String(m.done.length), top, true));
-    h.push(sectionBody_('<table role="presentation" width="100%" cellpadding="0" cellspacing="0">' + done.join('') + '</table>'));
-    top = 36;
-  }
-
   if (m.openCount) {
     var open = [];
     var shown = 0;
@@ -1623,10 +1614,6 @@ function emailText_(m) {
       for (var su = 0; su < subs.length; su++) t.push('      - ' + plain_(subs[su]));
     }
   }
-  t.push('');
-  t.push('TASKS DONE TODAY \u00b7 ' + m.done.length);
-  if (m.done.length === 0) t.push('None yet.');
-  for (var d = 0; d < m.done.length; d++) t.push('  - ' + plain_(m.done[d].title) + taskMetaText_(m.done[d], true));
   t.push('');
   t.push('STILL OPEN \u00b7 ' + m.openCount);
   if (m.openGroups.length === 0) t.push('Nothing open.');
