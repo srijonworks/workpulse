@@ -1,6 +1,6 @@
 // The phone page of the WorkPulse Apps Script: one self-contained HTML file (no external scripts, styles or
 // fonts) served by doGet?page=phone. It talks to the script only through google.script.run: phoneData,
-// phoneAddTask, phoneAddLog and phoneOlderLogs, each checked with the PIN (see core.ts).
+// phoneAddTask, phoneAddLog, phoneOlderLogs, phoneClockOut and phoneUndoClockOut, each checked with the PIN (see core.ts).
 //
 // Rules for this file:
 // - The page script is plain ES5 (var, function; no let/const, arrow functions or template literals),
@@ -54,6 +54,18 @@ button { background: none; border: 0; cursor: pointer; }
 .gold { color: var(--gold); }
 .statement { font-size: 15px; font-weight: 600; color: var(--band-ink); padding: 2px 0 2px; }
 .statement small { display: block; font-size: 13px; font-weight: 500; color: var(--band-mute); }
+
+/* Clock out, inside the band. */
+.clock { padding: 0 0 16px; }
+.clock .lab { margin-bottom: 6px; }
+.outsum { font-size: 13px; color: var(--band-mute); min-height: 18px; margin: 8px 0 12px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ghost { min-height: 52px; padding: 0 16px; border: 1px solid var(--band-mute); border-radius: 6px; color: var(--band-ink); font-weight: 600; font-size: 15px; }
+.outmsg { font-size: 13px; font-weight: 600; color: var(--band-ink); }
+.outmsg:empty { display: none; }
+.outmsg.bad { color: var(--gold); }
+#outBtn + .outmsg, #outForm + .outmsg { margin-top: 10px; }
+#outUndo { width: 100%; margin-top: 10px; }
 
 /* Tabs. */
 .tabs { display: flex; background: var(--paper); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; }
@@ -165,6 +177,20 @@ button { background: none; border: 0; cursor: pointer; }
       <button type="button" class="lock" id="lockBtn" hidden>Lock</button>
     </div>
     <div class="score" id="score"></div>
+    <div class="clock" id="clockBox" hidden>
+      <button type="button" class="go" id="outBtn">Clock out</button>
+      <form id="outForm" novalidate hidden>
+        <label for="outTime" class="lab">Left at</label>
+        <input class="inp" id="outTime" name="outTime" type="time">
+        <p class="outsum" id="outSum" aria-live="polite"></p>
+        <div class="row2">
+          <button type="submit" class="go" id="outGo">Clock out</button>
+          <button type="button" class="ghost" id="outCancel">Cancel</button>
+        </div>
+      </form>
+      <p class="outmsg" id="outMsg" role="status"></p>
+      <button type="button" class="ghost" id="outUndo" hidden>Undo clock-out</button>
+    </div>
   </header>
 
   <main class="pin" id="pinView" hidden>
@@ -283,7 +309,8 @@ button { background: none; border: 0; cursor: pointer; }
   var S = {
     gen: 0, pin: '', entry: '', checking: false, lockedUntil: 0, lockTimer: null,
     data: null, tab: 'tasks', flash: '', adding: false, addingLog: false, refreshing: false,
-    older: [], olderNext: '', olderMore: true, olderBusy: false, olderDone: false
+    older: [], olderNext: '', olderMore: true, olderBusy: false, olderDone: false,
+    outBusy: false, outReq: null
   };
 
   function $(id) { return document.getElementById(id); }
@@ -378,7 +405,9 @@ button { background: none; border: 0; cursor: pointer; }
       byName: byName,
       workdays: r.workdays && typeof r.workdays === 'object' ? r.workdays : {},
       pushedAt: str(r.pushedAt),
-      today: isDate(r.today) ? r.today : localDate(new Date())
+      today: isDate(r.today) ? r.today : localDate(new Date()),
+      clockOutEnabled: r.clockOutEnabled === true,
+      clockOuts: arr(r.clockOuts).filter(function (c) { return c && c.id; })
     };
   }
 
@@ -394,7 +423,7 @@ button { background: none; border: 0; cursor: pointer; }
     $('loadView').hidden = view !== 'load';
     $('mainView').hidden = view !== 'main';
     $('lockBtn').hidden = view !== 'main';
-    if (view !== 'main') { clear($('score')); $('bandDate').textContent = ''; }
+    if (view !== 'main') { clear($('score')); $('bandDate').textContent = ''; $('clockBox').hidden = true; }
   }
 
   function showLoading(text, canRetry) {
@@ -433,6 +462,12 @@ button { background: none; border: 0; cursor: pointer; }
     S.refreshing = false;
     S.olderBusy = false;
     S.adding = false;
+    S.outBusy = false;
+    S.outReq = null;
+    $('outForm').hidden = true;
+    $('outGo').disabled = false;
+    $('outGo').textContent = 'Clock out';
+    $('outUndo').disabled = false;
     $('refreshBtn').disabled = false;
     $('refreshBtn').textContent = 'Refresh';
     $('moreBtn').disabled = false;
@@ -530,6 +565,7 @@ button { background: none; border: 0; cursor: pointer; }
     S.olderDone = false;
     setMsg($('moreMsg'), '', '');
     setMsg($('mainMsg'), '', 'bad');
+    setMsg($('outMsg'), '', '');
     render();
   }
 
@@ -561,6 +597,7 @@ button { background: none; border: 0; cursor: pointer; }
   // ---- Rendering ----
   function render() {
     renderBand();
+    renderClock();
     renderTasks();
     renderLog();
     renderProjects();
@@ -594,6 +631,169 @@ button { background: none; border: 0; cursor: pointer; }
     score.appendChild(figure('Worked today', fmtHM((end - inAt.getTime()) / 60000), true));
     score.appendChild(figure('In at', timeOf(day.clockIn), false));
     if (outAt) score.appendChild(figure('Out at', timeOf(day.clockOut), false));
+  }
+
+  // ---- Clock out (script version 10) ----
+  // The day the phone may close, as the script picks it: today when clocked in, else yesterday (working past midnight).
+  function clockDay() {
+    var d = S.data;
+    var y = addDays(d.today, -1);
+    var t = d.workdays[d.today];
+    if (t && t.clockIn && !isNaN(new Date(t.clockIn).getTime())) return { date: d.today, w: t };
+    var w = d.workdays[y];
+    if (w && w.clockIn && !isNaN(new Date(w.clockIn).getTime())) return { date: y, w: w };
+    return null;
+  }
+
+  function phoneOut(date, clockOut) {
+    var list = S.data.clockOuts;
+    for (var i = list.length - 1; i >= 0; i--) {
+      if (str(list[i].date) === date && str(list[i].clockOut) === clockOut) return list[i];
+    }
+    return null;
+  }
+
+  function renderClock() {
+    var d = S.data;
+    var box = $('clockBox');
+    var day = clockDay();
+    var open = !!day && !day.w.clockOut;
+    var mine = day && !open ? phoneOut(day.date, str(day.w.clockOut)) : null;
+    if (!d.clockOutEnabled || !day || (!open && !mine)) {
+      box.hidden = true;
+      $('outForm').hidden = true;
+      return;
+    }
+    box.hidden = false;
+    if (!open) $('outForm').hidden = true;
+    $('outBtn').hidden = !open || !$('outForm').hidden;
+    $('outBtn').textContent = day.date === d.today ? 'Clock out' : 'Clock out of yesterday';
+    if (mine) {
+      setMsg($('outMsg'), 'Clocked out from your phone at ' + timeOf(mine.clockOut) + '. ' +
+        (mine.taken ? 'Your PC has it.' : 'Your PC takes it the next time WorkPulse runs there.'), '');
+      $('outUndo').hidden = !(!mine.taken && Date.parse(str(mine.undoUntil)) > Date.now());
+    } else {
+      $('outUndo').hidden = true;
+    }
+  }
+
+  // The chosen time as a phone-local instant: today at that time, or yesterday when that is still to come.
+  function chosenOut() {
+    var m = /^(\d{2}):(\d{2})$/.exec($('outTime').value);
+    if (!m) return null;
+    var now = new Date();
+    var t = new Date(now.getFullYear(), now.getMonth(), now.getDate(), +m[1], +m[2], 0, 0);
+    if (t.getTime() > now.getTime() + 60000) t = new Date(t.getTime() - 86400000);
+    return t;
+  }
+
+  // '' when fine, else what to fix.
+  function outProblem(day, t) {
+    if (!t) return 'Pick the time you left.';
+    if (t.getTime() <= new Date(day.w.clockIn).getTime()) return 'Pick a time after you clocked in (' + timeOf(day.w.clockIn) + ').';
+    return '';
+  }
+
+  function renderOutSum() {
+    var day = clockDay();
+    if (!day) return;
+    var t = chosenOut();
+    var problem = outProblem(day, t);
+    $('outSum').textContent = problem || ('Worked ' + fmtHM((t.getTime() - new Date(day.w.clockIn).getTime()) / 60000) +
+      ' since ' + timeOf(day.w.clockIn) + (day.date === S.data.today ? '' : ' yesterday') + '.');
+  }
+
+  function openOutForm() {
+    var now = new Date();
+    $('outTime').value = pad(now.getHours()) + ':' + pad(now.getMinutes());
+    $('outForm').hidden = false;
+    $('outBtn').hidden = true;
+    setMsg($('outMsg'), '', '');
+    renderOutSum();
+    $('outTime').focus();
+  }
+
+  function closeOutForm() {
+    $('outForm').hidden = true;
+    renderClock();
+    if (!$('outBtn').hidden) $('outBtn').focus();
+  }
+
+  function newRequestId() {
+    return 'po-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+  }
+
+  function clockOut(ev) {
+    ev.preventDefault();
+    if (S.outBusy || !S.pin) return;
+    var day = clockDay();
+    if (!day || day.w.clockOut) { closeOutForm(); return; }
+    var t = chosenOut();
+    var problem = outProblem(day, t);
+    if (problem) { setMsg($('outMsg'), problem, 'bad'); $('outTime').focus(); return; }
+    // Within the current minute: the Sheet stamps its own now, to the second.
+    var at = Date.now() - t.getTime() < 60000 ? '' : t.toISOString();
+    // A retry after a lost answer keeps the same id, so the Sheet never closes the day twice.
+    if (!S.outReq || S.outReq.at !== at) S.outReq = { id: newRequestId(), at: at };
+    S.outBusy = true;
+    var btn = $('outGo');
+    btn.disabled = true;
+    btn.textContent = 'Clocking out...';
+    setMsg($('outMsg'), '', '');
+    var g = S.gen;
+    var call = server(function (r) {
+      if (stale(g)) return;
+      S.outBusy = false;
+      btn.disabled = false;
+      btn.textContent = 'Clock out';
+      if (!r.ok) {
+        if (isAuthFailure(r)) { dropStore(PIN_KEY); showPin(r); return; }
+        if (r.code !== 'offline') S.outReq = null;
+        setMsg($('outMsg'), str(r.message) || OFFLINE, 'bad');
+        return;
+      }
+      S.outReq = null;
+      var c = r.clockOut || {};
+      var date = str(c.date);
+      var w = S.data.workdays[date] || {};
+      w.clockOut = str(c.clockOut);
+      S.data.workdays[date] = w;
+      S.data.clockOuts = S.data.clockOuts.filter(function (x) { return x.id !== c.id; });
+      S.data.clockOuts.push(c);
+      $('outForm').hidden = true;
+      renderBand();
+      renderClock();
+    });
+    if (call) call.phoneClockOut(S.pin, S.outReq);
+  }
+
+  function undoOut() {
+    if (S.outBusy || !S.pin) return;
+    var day = clockDay();
+    var mine = day && day.w.clockOut ? phoneOut(day.date, str(day.w.clockOut)) : null;
+    if (!mine) return;
+    S.outBusy = true;
+    var btn = $('outUndo');
+    btn.disabled = true;
+    var g = S.gen;
+    var call = server(function (r) {
+      if (stale(g)) return;
+      S.outBusy = false;
+      btn.disabled = false;
+      if (!r.ok) {
+        if (isAuthFailure(r)) { dropStore(PIN_KEY); showPin(r); return; }
+        setMsg($('outMsg'), str(r.message) || OFFLINE, 'bad');
+        if (r.code === 'taken' || r.code === 'too_late') btn.hidden = true;
+        return;
+      }
+      delete S.data.workdays[str(mine.date)].clockOut;
+      S.data.clockOuts = S.data.clockOuts.filter(function (x) { return x.id !== mine.id; });
+      renderBand();
+      renderClock();
+      setMsg($('outMsg'), 'Clock-out undone. The day is open again.', '');
+      $('outBtn').focus();
+    });
+    if (call) call.phoneUndoClockOut(S.pin, mine.id);
   }
 
   // Open tasks from the PC plus the phone tasks it has not taken yet (once each).
@@ -989,7 +1189,12 @@ button { background: none; border: 0; cursor: pointer; }
   $('addForm').addEventListener('submit', addTask);
   $('logForm').addEventListener('submit', addLog);
   $('retryBtn').addEventListener('click', start);
-  setInterval(function () { if (S.data && !$('mainView').hidden) renderBand(); }, 30000);
+  $('outBtn').addEventListener('click', openOutForm);
+  $('outCancel').addEventListener('click', closeOutForm);
+  $('outForm').addEventListener('submit', clockOut);
+  $('outTime').addEventListener('input', renderOutSum);
+  $('outUndo').addEventListener('click', undoOut);
+  setInterval(function () { if (S.data && !$('mainView').hidden) { renderBand(); renderClock(); } }, 30000);
 
   function start() {
     var saved = readStore(PIN_KEY);

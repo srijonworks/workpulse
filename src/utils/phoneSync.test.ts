@@ -1,7 +1,34 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import type { BacklogTask, Project, WorkLog } from '../types';
 import { defaultProject } from './projects';
-import { buildSnapshot, snapshotSignature, mergeInbox, type InboxItem } from './phoneSync';
+import { buildSnapshot, snapshotSignature, mergeInbox, applyPhoneClockOuts, type InboxItem } from './phoneSync';
+
+describe('applyPhoneClockOuts', () => {
+  const IN = '2026-11-11T03:00:00.000Z';
+  const item = { id: 'po-1', date: '2026-11-11', clockIn: IN, clockOut: '2026-11-11T11:00:00.000Z' };
+
+  it('closes the same open day', () => {
+    const r = applyPhoneClockOuts({ '2026-11-11': { clockIn: IN } }, [item]);
+    expect(r.workdays['2026-11-11']).toEqual({ clockIn: IN, clockOut: item.clockOut });
+    expect(r.applied).toEqual([item]);
+    expect(r.handledIds).toEqual(['po-1']);
+  });
+
+  it('the first clock-out wins: a closed day keeps its time, but the item is still handled', () => {
+    const days = { '2026-11-11': { clockIn: IN, clockOut: '2026-11-11T10:00:00.000Z' } };
+    const r = applyPhoneClockOuts(days, [item]);
+    expect(r.workdays).toBe(days);
+    expect(r.applied).toEqual([]);
+    expect(r.handledIds).toEqual(['po-1']);
+  });
+
+  it('skips a day with another clock-in, a missing day and a clock-out before the clock-in', () => {
+    const days = { '2026-11-11': { clockIn: '2026-11-11T04:00:00.000Z' } };
+    expect(applyPhoneClockOuts(days, [item]).workdays).toBe(days);
+    expect(applyPhoneClockOuts({}, [item]).applied).toEqual([]);
+    expect(applyPhoneClockOuts({ '2026-11-11': { clockIn: IN } }, [{ ...item, clockOut: '2026-11-11T02:00:00.000Z' }]).applied).toEqual([]);
+  });
+});
 
 beforeAll(() => {
   process.env.TZ = 'Asia/Dhaka';

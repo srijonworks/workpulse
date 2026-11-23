@@ -36,11 +36,11 @@ const snapshot = (over: Record<string, unknown> = {}) => ({
 });
 
 describe('script v3: existing behaviour', () => {
-  it('ping reports version 9 on GET and POST', () => {
+  it('ping reports version 10 on GET and POST', () => {
     const h = createScriptHarness();
-    expect(h.get({ action: 'ping' })).toMatchObject({ status: 'ok', version: 9 });
-    expect(h.get({})).toMatchObject({ status: 'ok', version: 9 });
-    expect(h.call('ping')).toMatchObject({ status: 'ok', version: 9 });
+    expect(h.get({ action: 'ping' })).toMatchObject({ status: 'ok', version: 10 });
+    expect(h.get({})).toMatchObject({ status: 'ok', version: 10 });
+    expect(h.call('ping')).toMatchObject({ status: 'ok', version: 10 });
   });
 
   it('appendLog still upserts by Id into the 12 log columns', () => {
@@ -467,7 +467,8 @@ describe('script v3: exposure and style', () => {
     const exposed = names.filter((n) => !n.endsWith('_')).sort();
     expect(exposed).toEqual([
       'authorizeWorkPulse', 'buildEveningEmail', 'checkPin', 'checkToken', 'doGet', 'doPost', 'getOrCreateLogsSheet', 'hashSecret',
-      'phoneAddLog', 'phoneAddTask', 'phoneData', 'phoneOlderLogs', 'sendEveningEmail', 'servePhonePage', 'upsertRows', 'withLock',
+      'phoneAddLog', 'phoneAddTask', 'phoneClockOut', 'phoneData', 'phoneOlderLogs', 'phoneUndoClockOut', 'sendEveningEmail', 'servePhonePage',
+      'upsertRows', 'withLock',
     ]);
   });
 

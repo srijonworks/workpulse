@@ -150,6 +150,8 @@ export interface AppSettings {
   // Phone page link. The token, last sync time, device id and last error belong to this device:
   // none of them is written into backup files or replaced by an import.
   phoneToken?: string;
+  // The phone page may clock out the open day (script version 10). Absent = on; false hides the button and the script refuses.
+  phoneClockOutEnabled?: boolean;
   phoneSyncAt?: string; // ISO
   phoneDeviceId?: string;
   phoneLastError?: string;

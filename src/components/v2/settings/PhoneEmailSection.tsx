@@ -428,7 +428,7 @@ export const PhoneEmailSection: React.FC<PhoneEmailSectionProps> = ({ settings, 
           </p>
           {version < LATEST_SCRIPT_VERSION && (
             <p role="alert" className="text-danger">
-              Your Sheet runs script version {version}; version {LATEST_SCRIPT_VERSION} is out (new email design). Re-paste the script
+              Your Sheet runs script version {version}; version {LATEST_SCRIPT_VERSION} is out (clock out from the phone). Re-paste the script
               (Settings &gt; Google Sheet &gt; Copy code) and update your existing deployment (Deploy, Manage deployments, edit, New version).
             </p>
           )}
@@ -463,6 +463,24 @@ export const PhoneEmailSection: React.FC<PhoneEmailSectionProps> = ({ settings, 
               </div>
             </div>
             <p className={`${HINT} mt-1`}>Open it on your phone and add it to the home screen. Keep it private.</p>
+          </div>
+        )}
+
+        {token && (
+          <div className="w-full">
+            <label className="flex items-center gap-2.5 min-h-11 text-[length:var(--fs-body)] text-[var(--text-main)] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.phoneClockOutEnabled !== false}
+                onChange={(e) => onUpdateSettings({ phoneClockOutEnabled: e.target.checked })}
+                className="w-4 h-4 accent-[var(--accent-text)]"
+              />
+              <span className="font-semibold">Allow clock out from the phone</span>
+            </label>
+            <p className={HINT}>
+              The phone page shows a Clock out button while your day is open. This computer takes the clock-out the next time
+              WorkPulse runs, and pauses running timers at that time. Needs script version 10.
+            </p>
           </div>
         )}
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSettings, BacklogTask, Project, WorkLog, Workdays } from '../types';
-import { buildSnapshot, mergeInbox, snapshotSignature, type InboxItem } from '../utils/phoneSync';
+import { buildSnapshot, mergeInbox, snapshotSignature, type InboxItem, type PhoneClockOut } from '../utils/phoneSync';
 import { ackInbox, pullInbox, pushState, type PhoneApiResult } from '../utils/phoneApi';
 import { ensureDeviceId } from '../utils/phoneSettings';
 import { isRunningTask, sameTasksIgnoringLiveTime } from '../utils/timerStore';
@@ -16,6 +16,7 @@ const FOCUS_PULL_GAP_MS = 10_000;
 
 const SAVE_FAILED = 'Could not save the phone tasks on this computer. They stay waiting in the Sheet.';
 const PULL_FAILED = 'Could not add the phone tasks just now. They stay waiting in the Sheet.';
+const CLOCK_OUT_SAVE_FAILED = 'Could not save the clock-out from your phone on this computer. It stays waiting in the Sheet.';
 
 /** Push when what the phone shows changed, or every 5 minutes while a timer runs (tracked minutes move). */
 export function shouldPush(i: {
@@ -30,11 +31,17 @@ export function shouldPush(i: {
 }
 
 export interface PullDeps {
-  pull(): Promise<PhoneApiResult<{ items?: InboxItem[] }>>;
+  pull(): Promise<PhoneApiResult<{ items?: InboxItem[]; clockOuts?: PhoneClockOut[] }>>;
   merge(items: InboxItem[]): { backlog: BacklogTask[]; added: BacklogTask[]; takenIds: string[] };
   /** True only when the merged tasks are safely stored. */
   save(next: BacklogTask[]): boolean;
-  ack(ids: string[]): Promise<PhoneApiResult>;
+  /**
+   * Applies the phone's clock-outs and stores the workdays (see applyPhoneClockOuts). Null when they could not be stored:
+   * nothing is acknowledged, so they stay waiting in the Sheet. Absent = clock-outs are left alone.
+   */
+  applyClockOuts?(items: PhoneClockOut[]): { applied: PhoneClockOut[]; handledIds: string[] } | null;
+  /** `clockOutIds` is passed only when there are some. */
+  ack(ids: string[], clockOutIds?: string[]): Promise<PhoneApiResult>;
 }
 
 const text = (v: unknown): string => (typeof v === 'string' ? v : '');
@@ -60,22 +67,70 @@ function cleanItems(raw: unknown): InboxItem[] {
   return out;
 }
 
+const ISO = /^\d{4}-\d{2}-\d{2}T/;
+
+// The phone clock-outs the Sheet sent, cleaned the same way; one with a missing date or time is skipped (never acknowledged).
+function cleanClockOuts(raw: unknown): PhoneClockOut[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PhoneClockOut[] = [];
+  for (const it of raw) {
+    if (!it || typeof it !== 'object') continue;
+    const o = it as Record<string, unknown>;
+    const date = text(o.date);
+    const clockIn = text(o.clockIn);
+    const clockOut = text(o.clockOut);
+    if (typeof o.id !== 'string' || !o.id || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !ISO.test(clockIn) || !ISO.test(clockOut)) continue;
+    out.push({ id: o.id, date, clockIn, clockOut });
+  }
+  return out;
+}
+
+export interface PullResult {
+  /** Tasks the phone added. */
+  added: BacklogTask[];
+  /** Phone clock-outs that closed a day on this computer. */
+  clockedOut?: PhoneClockOut[];
+  error?: string;
+}
+
 /**
  * One pull: read the inbox, merge, save, and only after a successful save mark the items taken.
  * If the ack fails the tasks stay here and the next pull skips them (their ids already exist).
+ * Phone clock-outs go the same way: applied and stored first, then acknowledged.
  */
-export async function pullAndMerge(deps: PullDeps): Promise<{ added: BacklogTask[]; error?: string }> {
+export async function pullAndMerge(deps: PullDeps): Promise<PullResult> {
   const r = await deps.pull();
   if (!r.ok) return { added: [], error: r.message };
   const items = cleanItems(r.data?.items);
-  if (items.length === 0) return { added: [] };
-  const merged = deps.merge(items);
-  if (!deps.save(merged.backlog)) return { added: [], error: SAVE_FAILED };
-  if (merged.takenIds.length > 0) {
-    const a = await deps.ack(merged.takenIds);
-    if (!a.ok) return { added: merged.added, error: a.message };
+  const outs = deps.applyClockOuts ? cleanClockOuts(r.data?.clockOuts) : [];
+  if (items.length === 0 && outs.length === 0) return { added: [] };
+
+  let added: BacklogTask[] = [];
+  let takenIds: string[] = [];
+  if (items.length > 0) {
+    const merged = deps.merge(items);
+    if (!deps.save(merged.backlog)) return { added: [], error: SAVE_FAILED };
+    added = merged.added;
+    takenIds = merged.takenIds;
   }
-  return { added: merged.added };
+
+  const result: PullResult = { added };
+  let outIds: string[] = [];
+  if (outs.length > 0) {
+    const applied = deps.applyClockOuts!(outs);
+    if (applied) {
+      outIds = applied.handledIds;
+      if (applied.applied.length > 0) result.clockedOut = applied.applied;
+    } else {
+      result.error = CLOCK_OUT_SAVE_FAILED;
+    }
+  }
+
+  if (takenIds.length > 0 || outIds.length > 0) {
+    const a = outIds.length > 0 ? await deps.ack(takenIds, outIds) : await deps.ack(takenIds);
+    if (!a.ok) result.error = a.message;
+  }
+  return result;
 }
 
 /** Waits before the quick retries after a failed push (10 s, 10 s, 20 s, 40 s); after them the minute cycle goes on. */
@@ -123,6 +178,8 @@ export interface PhoneSyncArgs {
   /** Adds the new tasks in `next` to the current backlog and saves; true only when the save worked. */
   mergeAndSaveBacklog(next: BacklogTask[]): boolean;
   onTasksAdded(added: BacklogTask[]): void;
+  /** Applies the phone's clock-outs to the newest workdays and saves them (null when the save failed). */
+  applyPhoneClockOuts(items: PhoneClockOut[]): { applied: PhoneClockOut[]; handledIds: string[] } | null;
 }
 
 const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -137,6 +194,7 @@ const snapshotOf = (a: PhoneSyncArgs, deviceId: string) =>
     tz: zone(),
     deviceId,
     today: a.today,
+    phoneClockOut: a.settings.phoneClockOutEnabled,
   });
 
 export function usePhoneSync(args: PhoneSyncArgs): {
@@ -187,6 +245,7 @@ export function usePhoneSync(args: PhoneSyncArgs): {
       c.workdays === args.workdays &&
       c.today === args.today &&
       c.settings.workdayHours === settings.workdayHours &&
+      c.settings.phoneClockOutEnabled === settings.phoneClockOutEnabled &&
       sameTasksIgnoringLiveTime(c.backlog, args.backlog)
     ) {
       signature = sigCache.current!.sig;
@@ -281,7 +340,7 @@ export function usePhoneSync(args: PhoneSyncArgs): {
         const tok = s.phoneToken || '';
         if (!scriptUrl || !tok) return [];
         lastPullAt.current = Date.now();
-        let out: { added: BacklogTask[]; error?: string };
+        let out: PullResult;
         try {
           out = await pullAndMerge({
             pull: () => pullInbox(scriptUrl, tok),
@@ -290,7 +349,8 @@ export function usePhoneSync(args: PhoneSyncArgs): {
               return mergeInbox(a.backlog, a.projects, items, a.today);
             },
             save: (next) => latest.current.mergeAndSaveBacklog(next),
-            ack: (ids) => ackInbox(scriptUrl, tok, ids),
+            applyClockOuts: (items) => latest.current.applyPhoneClockOuts(items),
+            ack: (ids, clockOutIds) => ackInbox(scriptUrl, tok, ids, clockOutIds),
           });
         } catch {
           out = { added: [], error: PULL_FAILED };

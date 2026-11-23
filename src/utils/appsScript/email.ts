@@ -503,6 +503,9 @@ function dueStandups_(now, meta, settings) {
   }
   var texts = standupTexts_();
   var list = dayEmailLog_();
+  var phoneOuts = {};
+  var po = phoneClockOuts_();
+  for (i = 0; i < po.length; i++) phoneOuts[po[i].date] = po[i];
   var out = [];
   function add(kind, from, to, hasLogs, waitUntil) {
     var key = kind + '|' + from + '|' + to;
@@ -518,6 +521,7 @@ function dueStandups_(now, meta, settings) {
     // Closed: clocked out, or still open after its date. A clock-out waits a little for the PC's standup.
     if (!w.clockOut && d >= today) continue;
     var waitUntil = w.clockOut ? w.clockOut.getTime() + SWEEP_GRACE_MS : 0;
+    if (w.clockOut) waitUntil = Math.max(waitUntil, phoneOutWaitUntil_(phoneOuts[d], w.clockOut));
     add('day', d, d, logDays[d] === true, waitUntil);
     if (weekdayOf_(d) === 4) {
       var from = addDays_(d, -6);
@@ -527,6 +531,16 @@ function dueStandups_(now, meta, settings) {
     }
   }
   return out;
+}
+
+// A day closed from the phone (version 10) gives the PC time to send its own logs and standup first: until the PC has
+// taken the clock-out, at most PHONE_OUT_WAIT_MS after it was made; once taken, the usual grace from that moment.
+// 0 when the day's clock-out did not come from the phone.
+var PHONE_OUT_WAIT_MS = 60 * 60000;
+function phoneOutWaitUntil_(entry, clockOut) {
+  if (!entry || entry.clockOut !== clockOut.toISOString()) return 0;
+  if (entry.applied) return new Date(entry.applied).getTime() + SWEEP_GRACE_MS;
+  return new Date(entry.at).getTime() + PHONE_OUT_WAIT_MS;
 }
 
 // Writes and sends the due emails. Returns how many went. A standup the Sheet wrote is saved to WorkPulse_Standups, so the

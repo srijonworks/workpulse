@@ -49,7 +49,7 @@ export async function testSheetConnection(scriptUrl: string): Promise<SyncResult
     message =
       'Connected. Log sync works, but the phone page and evening email need the latest script: re-paste it below, then update your existing deployment (Deploy, Manage deployments, edit, New version).';
   } else if (version < LATEST_SCRIPT_VERSION) {
-    message = `Connected. Your script is version ${version}; version ${LATEST_SCRIPT_VERSION} is out (new email design). Re-paste the script below, then update your existing deployment (Deploy, Manage deployments, edit, New version).`;
+    message = `Connected. Your script is version ${version}; version ${LATEST_SCRIPT_VERSION} is out (clock out from the phone). Re-paste the script below, then update your existing deployment (Deploy, Manage deployments, edit, New version).`;
   }
   return { success: true, message };
 }

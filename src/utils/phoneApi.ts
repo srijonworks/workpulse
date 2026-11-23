@@ -1,7 +1,7 @@
 import { plainSheetMessage } from './aiErrors';
 import { requestJson, type NetFailKind } from './net/http';
 import { scriptClientTimeoutMs } from './net/scriptTimeouts';
-import type { InboxItem, PhoneSnapshot } from './phoneSync';
+import type { InboxItem, PhoneClockOut, PhoneSnapshot } from './phoneSync';
 
 // Calls to the user's Google Apps Script through the local /api/sheets/proxy. The PIN and the token
 // travel only in the POST body, never in a URL. Every call has a time limit and always comes back as a
@@ -98,12 +98,14 @@ export function pushState(url: string, token: string, snapshot: PhoneSnapshot): 
   return call(url, 'pushState', { token, ...snapshot }, 'Phone page updated.');
 }
 
-export function pullInbox(url: string, token: string): Promise<PhoneApiResult<{ items: InboxItem[] }>> {
+/** `clockOuts` comes from script version 10 (the phone page's clock-outs this computer has not taken yet). */
+export function pullInbox(url: string, token: string): Promise<PhoneApiResult<{ items: InboxItem[]; clockOuts?: PhoneClockOut[] }>> {
   return call(url, 'pullInbox', { token }, 'Inbox checked.');
 }
 
-export function ackInbox(url: string, token: string, ids: string[]): Promise<PhoneApiResult> {
-  return call(url, 'ackInbox', { token, ids }, 'Inbox cleared.');
+/** `clockOutIds` marks phone clock-outs taken (script version 10; an older script ignores the field). */
+export function ackInbox(url: string, token: string, ids: string[], clockOutIds: string[] = []): Promise<PhoneApiResult> {
+  return call(url, 'ackInbox', clockOutIds.length > 0 ? { token, ids, clockOutIds } : { token, ids }, 'Inbox cleared.');
 }
 
 /** The first script version that sends "when I clock out" emails by itself (a timer in the Sheet), with its own Gemini call. */

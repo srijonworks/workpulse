@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { BacklogTask, Project } from '../types';
-import { mergeInbox, type InboxItem } from '../utils/phoneSync';
+import type { BacklogTask, Project, Workdays } from '../types';
+import { applyPhoneClockOuts, mergeInbox, type InboxItem, type PhoneClockOut } from '../utils/phoneSync';
 import { shouldPush, pullAndMerge, combinedError, newClockOut, pushRetryDelay, RUNNING_PUSH_MS } from './usePhoneSync';
 
 process.env.TZ = 'Asia/Dhaka';
@@ -126,6 +126,53 @@ describe('pullAndMerge', () => {
     const out = await pullAndMerge(d.deps);
     expect(out.added.map((t) => t.id)).toEqual(['phone-1']);
     expect(d.deps.ack).toHaveBeenCalledWith(['phone-x', 'phone-1']);
+  });
+});
+
+describe('pullAndMerge: phone clock-outs', () => {
+  const IN = '2026-11-11T03:00:00.000Z';
+  const out = { id: 'po-1', date: TODAY, clockIn: IN, clockOut: '2026-11-11T11:00:00.000Z' };
+
+  function withClockOuts(clockOuts: unknown[], stored: Workdays | null) {
+    let workdays: Workdays = { [TODAY]: { clockIn: IN } };
+    const d = desktop([]);
+    d.deps.pull.mockResolvedValue({ ok: true, message: 'Inbox checked.', data: { items: [], clockOuts } } as never);
+    const applyClockOuts = vi.fn((items: PhoneClockOut[]) => {
+      const r = applyPhoneClockOuts(workdays, items);
+      if (stored === null) return null;
+      workdays = r.workdays;
+      return { applied: r.applied, handledIds: r.handledIds };
+    });
+    return { d, deps: { ...d.deps, applyClockOuts }, get workdays() { return workdays; } };
+  }
+
+  it('applies and stores the clock-out, then acks it with no task ids', async () => {
+    const x = withClockOuts([out], {});
+    const res = await pullAndMerge(x.deps);
+    expect(res.clockedOut).toEqual([out]);
+    expect(x.workdays[TODAY].clockOut).toBe(out.clockOut);
+    expect(x.d.deps.ack).toHaveBeenCalledWith([], ['po-1']);
+    expect(x.d.deps.save).not.toHaveBeenCalled();
+  });
+
+  it('a failed save sends no ack, so the clock-out waits in the Sheet', async () => {
+    const x = withClockOuts([out], null);
+    const res = await pullAndMerge(x.deps);
+    expect(res.error).toMatch(/could not save the clock-out/i);
+    expect(x.d.deps.ack).not.toHaveBeenCalled();
+  });
+
+  it('skips broken entries and never acks them', async () => {
+    const x = withClockOuts([null, { id: 'po-2', date: TODAY, clockIn: IN }, { id: 'po-3', date: 'x', clockIn: IN, clockOut: out.clockOut }, out], {});
+    await pullAndMerge(x.deps);
+    expect(x.d.deps.ack).toHaveBeenCalledWith([], ['po-1']);
+  });
+
+  it('without applyClockOuts (left alone) nothing is acked', async () => {
+    const x = withClockOuts([out], {});
+    const res = await pullAndMerge(x.d.deps);
+    expect(res).toEqual({ added: [] });
+    expect(x.d.deps.ack).not.toHaveBeenCalled();
   });
 });
 

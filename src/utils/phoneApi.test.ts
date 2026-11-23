@@ -108,7 +108,7 @@ describe('phoneApi', () => {
     await setEmailSchedule(URL_, 'tok', { enabled: true, hour: 18, minute: 0, tz: 'Asia/Dhaka' });
     await sendTestEmail(URL_, 'tok');
     await ackInbox(URL_, 'tok', ['a', 'b']);
-    const snap = { tasks: [], logs: [], workdays: {}, projects: [], workdayHours: 8, tz: 'Asia/Dhaka', deviceId: 'd', today: '2026-11-11' } as PhoneSnapshot;
+    const snap = { tasks: [], logs: [], workdays: {}, projects: [], workdayHours: 8, tz: 'Asia/Dhaka', deviceId: 'd', today: '2026-11-11', phoneClockOut: true } as PhoneSnapshot;
     await pushState(URL_, 'tok', snap);
     const payloads = f.mock.calls.map((c) => JSON.parse(String(c[1].body)).payload);
     expect(payloads[0]).toEqual({ action: 'setEmail', token: 'tok', enabled: true, hour: 18, minute: 0, tz: 'Asia/Dhaka' });

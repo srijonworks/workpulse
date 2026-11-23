@@ -31,6 +31,7 @@ import { buildBackup, downloadTextFile, parseBackup } from './utils/backup';
 import { loggedSecondsOf, unloggedSeconds, isPendingTask, isDoneUnlogged, markTasksLogged } from './utils/taskLogging';
 import { advanceClock, MAX_TICK_GAP_SECONDS } from './utils/timer';
 import { startSegment, endSegment, pauseRunningAt, splitSegmentsAtGap } from './utils/segments';
+import { applyPhoneClockOuts, type PhoneClockOut } from './utils/phoneSync';
 import { moveRunningToDay, moveTasksToDay } from './utils/taskDates';
 import { minutesFromSeconds } from './utils/duration';
 import { unsyncedLogs } from './utils/syncStatus';
@@ -1460,6 +1461,37 @@ export default function App() {
     return result.ok;
   };
 
+  // A clock-out made on the phone page closes the same open day here, as if done on this computer at that time (running
+  // timers pause at it). The first clock-out wins: a day already closed here keeps its own time. Null = not saved, so the
+  // clock-out stays waiting in the Sheet.
+  const applyPhoneClockOutsHere = (items: PhoneClockOut[]): { applied: PhoneClockOut[]; handledIds: string[] } | null => {
+    if (leavingRef.current) return null;
+    let result: SaveResult = { ok: true };
+    let applied: PhoneClockOut[] = [];
+    let handledIds: string[] = [];
+    flushSync(() =>
+      setWorkdays((prev) => {
+        const r = applyPhoneClockOuts(prev, items);
+        applied = r.applied;
+        handledIds = r.handledIds;
+        if (r.workdays === prev) {
+          result = { ok: true };
+          return prev;
+        }
+        result = storeWorkdays(r.workdays);
+        return result.ok ? r.workdays : prev;
+      }),
+    );
+    persist(result);
+    if (!result.ok) return null;
+    for (const it of applied) {
+      const paused = pauseRunningForClockOut(it.clockOut);
+      const day = it.date === localDateStr() ? '' : ` (${it.date})`;
+      addToast(`Clocked out from your phone at ${localTimeStr(new Date(it.clockOut))}${day}.${pausedNote(paused)} Use Resume to reopen the day.`, 'info');
+    }
+    return { applied, handledIds };
+  };
+
   const phone = usePhoneSync({
     enabled: dataLoaded,
     settings,
@@ -1474,6 +1506,7 @@ export default function App() {
       phoneArrivals.current = [...phoneArrivals.current, ...added];
       addToast(`${added.length} ${added.length === 1 ? 'task' : 'tasks'} added from your phone`, 'success');
     },
+    applyPhoneClockOuts: applyPhoneClockOutsHere,
   });
   // Failed saves are retried, and only one window writes (see hooks/usePersistence).
   usePersistence(dataLoaded);

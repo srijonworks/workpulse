@@ -40,6 +40,8 @@ export interface PhoneSnapshot {
   tz: string;
   deviceId: string;
   today: string;
+  /** The phone page may clock out (script version 10 reads it; older scripts ignore it). */
+  phoneClockOut: boolean;
 }
 
 const DONE_DAYS = 7;
@@ -58,6 +60,8 @@ export function buildSnapshot(i: {
   tz: string;
   deviceId: string;
   today: string;
+  /** AppSettings.phoneClockOutEnabled: absent = on. */
+  phoneClockOut?: boolean;
 }): PhoneSnapshot {
   const names = new Map(i.projects.map((p) => [p.id, p.name]));
   const recentDone = new Set(lastNDays(i.today, DONE_DAYS));
@@ -112,6 +116,7 @@ export function buildSnapshot(i: {
     tz: i.tz,
     deviceId: i.deviceId,
     today: i.today,
+    phoneClockOut: i.phoneClockOut !== false,
   };
 }
 
@@ -122,6 +127,7 @@ export function snapshotSignature(s: PhoneSnapshot): string {
   return JSON.stringify([
     s.today,
     s.workdayHours,
+    s.phoneClockOut,
     s.tasks.map((t) => [t.id, t.title, t.projectId, t.project, t.dueDate, t.stage, t.completedAt ?? '', t.fromPhone]),
     s.logs.map((l) => [l.id, l.date, l.time, l.project, l.projectId, l.description, l.status, l.minutes, l.subTasks ?? []]),
     Object.keys(s.workdays)
@@ -177,4 +183,35 @@ export function mergeInbox(
   }
 
   return { backlog: [...backlog, ...added], added, takenIds: items.map((it) => it.id) };
+}
+
+// A clock-out made on the phone page (script version 10) that this computer has not taken yet.
+export interface PhoneClockOut {
+  id: string;
+  /** Local YYYY-MM-DD of the day it closes. */
+  date: string;
+  /** The day's clock-in as the phone saw it: the clock-out applies only to that same day. */
+  clockIn: string;
+  clockOut: string;
+}
+
+/**
+ * Applies phone clock-outs. The first clock-out wins: one applies only when the day is still open here with the same
+ * clock-in; a day already clocked out (by hand, End my day or the safety net) keeps its own time. Every item is handled
+ * either way, so all of them may be acknowledged.
+ */
+export function applyPhoneClockOuts(
+  workdays: Workdays,
+  items: PhoneClockOut[],
+): { workdays: Workdays; applied: PhoneClockOut[]; handledIds: string[] } {
+  let next = workdays;
+  const applied: PhoneClockOut[] = [];
+  for (const it of items) {
+    const rec = next[it.date];
+    if (!rec || rec.clockOut || rec.clockIn !== it.clockIn) continue;
+    if (!(Date.parse(it.clockOut) > Date.parse(rec.clockIn))) continue;
+    next = { ...next, [it.date]: { ...rec, clockOut: it.clockOut } };
+    applied.push(it);
+  }
+  return { workdays: next, applied, handledIds: items.map((it) => it.id) };
 }

@@ -6,7 +6,7 @@ Run by hand from the repo root (not part of `npm run test:smoke`; no dev server 
 
 It reads PHONE_PAGE_HTML from src/utils/appsScript/phonePage.ts (through tsx), serves it at a fake https
 origin so localStorage works, and replaces google.script.run with a stub that answers phoneData,
-phoneAddTask and phoneOlderLogs from canned data. Screenshots (390x844) go to the directory given.
+phoneAddTask, phoneOlderLogs, phoneClockOut and phoneUndoClockOut from canned data. Screenshots (390x844) go to the directory given.
 """
 import json
 import os
@@ -80,6 +80,8 @@ FULL = {
     ],
 }
 
+CLOCK = dict(FULL, clockOutEnabled=True, clockOuts=[])
+
 EMPTY = {"ok": True, "today": TODAY, "pushedAt": "", "workdayHours": 8, "projects": [], "workdays": {},
          "tasks": [], "pending": [], "logs": []}
 
@@ -130,6 +132,16 @@ STUB = r"""
         return { ok: true, item: { id: id, title: task.title, projectId: task.projectId, projectName: '',
           dueDate: task.day === 'tomorrow' ? '2026-11-12' : '2026-11-11', createdAt: new Date().toISOString() } };
       });
+    };
+    r.phoneClockOut = function (pin, req) {
+      answer('phoneClockOut', [pin, req], function () {
+        var made = new Date().getTime();
+        return { ok: true, clockOut: { id: req.id, date: '2026-11-11', clockOut: req.at || new Date(made).toISOString(), taken: false,
+          undoUntil: new Date(made + 600000).toISOString() } };
+      });
+    };
+    r.phoneUndoClockOut = function (pin, id) {
+      answer('phoneUndoClockOut', [pin, id], function () { return { ok: true }; });
     };
     r.phoneOlderLogs = function (pin, before) {
       answer('phoneOlderLogs', [pin, before], function () {
@@ -216,6 +228,7 @@ def main():
         score = page.text_content("#score")
         check("3:12" in score and "09:48" in score, "band shows worked 3:12 and in at 09:48: " + score)
         check("Data from your PC as of 09:55" in page.inner_text("#asofText"), "as-of line shows 09:55")
+        check(page.locator("#clockBox").is_hidden(), "no Clock out button with a script that does not offer it (before version 10)")
         check(page.evaluate("localStorage.getItem('workpulse_phone_pin')") == PIN, "PIN remembered on this phone")
         shot(page, "03-tasks")
         shot(page, "03-tasks-full", True)
@@ -351,6 +364,49 @@ def main():
         expect(page.locator("#mainView")).to_be_visible()
         check(page.locator("#tasksList .ti").count() > 0, "the page opens normally again after unlocking")
         check(not errors, "no page errors after unlocking again: %s" % errors)
+        ctx.close()
+
+        # ---- Clock out from the phone (script version 10) ----
+        ctx, page, errors = new_page(browser, html, CLOCK)
+        enter(page, PIN)
+        expect(page.locator("#mainView")).to_be_visible()
+        expect(page.locator("#outBtn")).to_be_visible()
+        check(page.locator("#outForm").is_hidden(), "the time form waits for the button")
+        shot(page, "15-clock-out-button")
+        page.click("#outBtn")
+        expect(page.locator("#outForm")).to_be_visible()
+        check(page.input_value("#outTime") == "13:00", "Left at starts at now (13:00): " + page.input_value("#outTime"))
+        check("Worked 3:12 since 09:48" in page.inner_text("#outSum"), "worked preview: " + page.inner_text("#outSum"))
+        shot(page, "16-clock-out-form")
+        no_hscroll(page, "clock out form")
+        page.fill("#outTime", "09:30")
+        check("after you clocked in (09:48)" in page.inner_text("#outSum"), "a time before the clock-in is flagged")
+        page.click("#outGo")
+        expect(page.locator("#outMsg")).to_contain_text("after you clocked in")
+        check(page.evaluate("window.__calls.filter(function (c) { return c.fn === 'phoneClockOut'; }).length") == 0,
+              "nothing is sent for a time before the clock-in")
+        page.fill("#outTime", "12:30")
+        check("Worked 2:42" in page.inner_text("#outSum"), "preview follows the time: " + page.inner_text("#outSum"))
+        page.click("#outGo")
+        expect(page.locator("#outMsg")).to_contain_text("Clocked out from your phone at 12:30")
+        call = page.evaluate("window.__calls.filter(function (c) { return c.fn === 'phoneClockOut'; })[0]")
+        check(call["args"][0] == PIN and call["args"][1]["at"] == "2026-11-11T06:30:00.000Z" and call["args"][1]["id"].startswith("po-"),
+              "phoneClockOut got the 12:30 instant and a request id: %s" % call["args"])
+        check("Out at" in page.text_content("#score") and "12:30" in page.text_content("#score"), "band shows Out at 12:30")
+        check(page.locator("#outBtn").is_hidden() and page.locator("#outForm").is_hidden(), "button and form go once out")
+        expect(page.locator("#outUndo")).to_be_visible()
+        shot(page, "17-clocked-out")
+        page.click("#outUndo")
+        expect(page.locator("#outMsg")).to_contain_text("Clock-out undone")
+        check(page.locator("#outBtn").is_visible() and "Out at" not in page.text_content("#score"), "Undo opens the day again")
+        shot(page, "18-undone")
+        check(not errors, "clock out: no page errors: %s" % errors)
+        ctx.close()
+
+        ctx, page, errors = new_page(browser, html, dict(CLOCK, clockOutEnabled=False))
+        enter(page, PIN)
+        expect(page.locator("#mainView")).to_be_visible()
+        check(page.locator("#clockBox").is_hidden(), "switched off on the PC: no Clock out button")
         ctx.close()
 
         # ---- Offline ----

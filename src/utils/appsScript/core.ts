@@ -1,5 +1,6 @@
 // Version 6 of the WorkPulse Apps Script (3 added the phone page, 4 the full backup in backup.ts, 5 the email recipients and sub-tasks,
-// 6 the locked log writes, day history, standup emails and phoneAddLog): phone PIN, desktop token, state tabs and the phone inbox.
+// 6 the locked log writes, day history, standup emails and phoneAddLog, 10 the phone clock-out): phone PIN, desktop token, state
+// tabs and the phone inbox.
 // Plain ES5-style Apps Script text, appended after the log code in googleAppsScriptTemplate.ts.
 //
 // google.script.run can call every top-level function whose name does not end with "_", from an
@@ -11,7 +12,7 @@ export const SCRIPT_CORE = String.raw`
 // Phone page, phone inbox and desktop state (version 3 and later)
 // =========================================================================
 
-var SCRIPT_VERSION = 9;
+var SCRIPT_VERSION = 10;
 var MAX_PIN_TRIES = 5;
 var LOCK_MINUTES = 15;
 var MAX_TITLE = 200;
@@ -301,11 +302,18 @@ function pushStateAction_(c) {
         num_(t.trackedMinutes), str_(t.completedAt), t.fromPhone === true ? 'TRUE' : 'FALSE'
       ]);
     }
+    // A phone clock-out the PC has not taken yet stays on its day: the PC's copy of that day is still open.
+    var waiting = {};
+    var outs = phoneClockOuts_();
+    for (i = 0; i < outs.length; i++) if (!outs[i].applied) waiting[outs[i].date] = outs[i];
     var days = [];
     for (var date in c.workdays) {
       if (!Object.prototype.hasOwnProperty.call(c.workdays, date)) continue;
       var w = c.workdays[date] || {};
-      days.push([str_(date), str_(w.clockIn), str_(w.clockOut)]);
+      var out = str_(w.clockOut);
+      var pend = waiting[date];
+      if (!out && pend && str_(w.clockIn) === pend.clockIn) out = pend.clockOut;
+      days.push([str_(date), str_(w.clockIn), out]);
     }
     var logs = [];
     for (i = 0; i < c.logs.length; i++) {
@@ -336,32 +344,42 @@ function pushStateAction_(c) {
       deviceId: deviceId,
       workdayHours: hours > 0 && hours <= 24 ? hours : DEFAULT_WORKDAY_HOURS,
       today: c.today,
-      deviceChanged: !!(old.deviceId && deviceId && old.deviceId !== deviceId)
+      deviceChanged: !!(old.deviceId && deviceId && old.deviceId !== deviceId),
+      // Absent (a PC on an older WorkPulse) = allowed, like the PC's own setting.
+      phoneClockOut: c.phoneClockOut !== false
     };
     props.setProperty('meta', JSON.stringify(meta));
     return { status: 'ok', pushedAt: meta.pushedAt, deviceChanged: meta.deviceChanged };
   });
 }
 
-// { token }: the phone tasks the desktop has not taken yet.
+// { token }: the phone tasks and phone clock-outs the desktop has not taken yet.
 function pullInboxAction_(c) {
   var check = checkToken(c.token);
   if (!check.ok) return errorOf_(check);
-  return { status: 'ok', items: pendingItems_() };
+  var outs = phoneClockOuts_();
+  var clockOuts = [];
+  for (var i = 0; i < outs.length; i++) {
+    var o = outs[i];
+    if (!o.applied) clockOuts.push({ id: o.id, date: o.date, clockIn: o.clockIn, clockOut: o.clockOut });
+  }
+  return { status: 'ok', items: pendingItems_(), clockOuts: clockOuts };
 }
 
-// { token, ids }: marks those inbox items taken. Unknown ids are ignored.
+// { token, ids, clockOutIds? }: marks those inbox items and phone clock-outs taken. Unknown ids are ignored.
 function ackInboxAction_(c) {
   var check = checkToken(c.token);
   if (!check.ok) return errorOf_(check);
   if (!isArray_(c.ids)) return badRequest_();
+  if (c.clockOutIds != null && !isArray_(c.clockOutIds)) return badRequest_();
   var wanted = {};
   for (var i = 0; i < c.ids.length; i++) wanted[String(c.ids[i])] = true;
   return withLock(function () {
+    var clockOuts = c.clockOutIds ? markClockOutsTaken_(c.clockOutIds) : 0;
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('WorkPulse_Inbox');
-    if (!sheet) return { status: 'ok', taken: 0 };
+    if (!sheet) return { status: 'ok', taken: 0, clockOuts: clockOuts };
     var rows = dataRows_(sheet, TAB_COLUMNS.WorkPulse_Inbox.length);
-    if (rows.length === 0) return { status: 'ok', taken: 0 };
+    if (rows.length === 0) return { status: 'ok', taken: 0, clockOuts: clockOuts };
     var status = [];
     var taken = 0;
     for (var r = 0; r < rows.length; r++) {
@@ -375,7 +393,7 @@ function ackInboxAction_(c) {
     if (taken > 0) {
       sheet.getRange(2, 7, status.length, 1).setNumberFormat('@').setValues(status);
     }
-    return { status: 'ok', taken: taken };
+    return { status: 'ok', taken: taken, clockOuts: clockOuts };
   });
 }
 
@@ -507,7 +525,9 @@ function phoneDataLocked_(pin) {
     pushedAt: meta.pushedAt || '',
     today: todayIn_(userTz_(meta)),
     workdayHours: meta.workdayHours || DEFAULT_WORKDAY_HOURS,
-    pending: pendingItems_()
+    pending: pendingItems_(),
+    clockOutEnabled: meta.phoneClockOut !== false,
+    clockOuts: phoneClockOutViews_()
   };
 }
 
@@ -581,6 +601,155 @@ function phoneAddLog(pin, log) {
       return { ok: true, log: { id: id, date: date, time: log.time, project: projectName, projectId: projectId, description: text, status: 'completed', minutes: minutes } };
     });
   });
+}
+
+// ---- Clock out from the phone (version 10) ----
+//
+// A phone clock-out is written into WorkPulse_Days at once, so the email sweep sees the day closed even with the PC off,
+// and kept in the Script Property phoneClockOuts as { id, date, clockIn, clockOut, at, applied } until the PC takes it
+// (pullInbox, then ackInbox clockOutIds sets applied). While it waits, pushState keeps it on the PC's still open copy of
+// the day, and the sweep waits for the PC (see phoneOutWaitUntil_ in email.ts). The first clock-out wins: the PC applies
+// it only to the same open day, and the phone can only close a day that is open in the Sheet.
+
+var PHONE_OUT_UNDO_MS = 10 * 60000;
+var PHONE_OUT_KEEP_DAYS = 4;
+var PHONE_OUT_FUTURE_MS = 2 * 60000;
+
+// req = { id, at? }: id is the page's own id for this request (a retry with the same id changes nothing); at is the
+// clock-out time as an ISO instant, or empty for now.
+function phoneClockOut(pin, req) {
+  return phoneCall_(function () {
+    return withLock(function () {
+      var check = checkPin(pin);
+      if (!check.ok) return check;
+      if (getMeta_().phoneClockOut === false) {
+        return fail_('off', 'Clock out from the phone is switched off. Switch it on in WorkPulse Settings on your PC.');
+      }
+      req = req && typeof req === 'object' ? req : {};
+      var id = str_(req.id);
+      if (!/^[A-Za-z0-9-]{8,80}$/.test(id)) return fail_('bad_request');
+      var list = phoneClockOuts_();
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === id) return { ok: true, clockOut: phoneClockOutView_(list[i]) };
+      }
+      var day = openPhoneDay_();
+      if (!day) return fail_('not_open', 'There is no open day to clock out of. Refresh to see the latest from your PC.');
+      var now = new Date();
+      var at = now;
+      if (req.at) {
+        at = new Date(String(req.at));
+        if (isNaN(at.getTime())) return fail_('bad_request', 'Pick the time you left.');
+        if (at.getTime() > now.getTime() + PHONE_OUT_FUTURE_MS) return fail_('bad_request', 'That time is still to come. Pick the time you left.');
+      }
+      if (at.getTime() <= new Date(day.clockIn).getTime()) return fail_('bad_request', 'Pick a time after you clocked in.');
+      var entry = { id: id, date: day.date, clockIn: day.clockIn, clockOut: at.toISOString(), at: now.toISOString(), applied: '' };
+      setDayClockOut_(day.date, entry.clockOut);
+      list.push(entry);
+      savePhoneClockOuts_(list);
+      return { ok: true, clockOut: phoneClockOutView_(entry) };
+    });
+  });
+}
+
+// Takes back a phone clock-out: only within PHONE_OUT_UNDO_MS and before the PC has taken it (after that, Resume on the PC).
+function phoneUndoClockOut(pin, id) {
+  return phoneCall_(function () {
+    return withLock(function () {
+      var check = checkPin(pin);
+      if (!check.ok) return check;
+      var list = phoneClockOuts_();
+      var at = -1;
+      for (var i = 0; i < list.length; i++) if (list[i].id === String(id)) at = i;
+      if (at < 0) return fail_('bad_request', 'That clock-out is not in the Sheet any more. Refresh to see the latest.');
+      var e = list[at];
+      if (e.applied) return fail_('taken', 'Your PC already has this clock-out. Use Resume on your PC to reopen the day.');
+      if (new Date().getTime() - new Date(e.at).getTime() > PHONE_OUT_UNDO_MS) {
+        return fail_('too_late', 'Undo works for 10 minutes. Use Resume on your PC to reopen the day.');
+      }
+      setDayClockOut_(e.date, '', e.clockOut);
+      list.splice(at, 1);
+      savePhoneClockOuts_(list);
+      return { ok: true };
+    });
+  });
+}
+
+// The day the phone may close: today, else yesterday (working past midnight), when it is clocked in and not out in the Sheet.
+function openPhoneDay_() {
+  var ssTz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+  var today = todayIn_(userTz_(getMeta_()));
+  var rows = readTab_('WorkPulse_Days');
+  var found = {};
+  for (var i = 0; i < rows.length; i++) {
+    var d = dateText_(rows[i][0], ssTz);
+    if (d) found[d] = { date: d, clockIn: isoText_(rows[i][1]), clockOut: isoText_(rows[i][2]) };
+  }
+  var order = [today, addDays_(today, -1)];
+  for (var j = 0; j < order.length; j++) {
+    var w = found[order[j]];
+    if (w && w.clockIn && !isNaN(new Date(w.clockIn).getTime())) return w.clockOut ? null : w;
+  }
+  return null;
+}
+
+// Writes the clock-out cell of a date in WorkPulse_Days. With onlyIf, only when the cell still holds that value.
+function setDayClockOut_(date, value, onlyIf) {
+  var sheet = getTab_('WorkPulse_Days');
+  var ssTz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+  var rows = dataRows_(sheet, TAB_COLUMNS.WorkPulse_Days.length);
+  for (var i = 0; i < rows.length; i++) {
+    if (dateText_(rows[i][0], ssTz) !== date) continue;
+    if (onlyIf !== undefined && isoText_(rows[i][2]) !== onlyIf) return;
+    sheet.getRange(i + 2, 3).setNumberFormat('@').setValue(value);
+    return;
+  }
+}
+
+function phoneClockOuts_() {
+  try {
+    var list = JSON.parse(PropertiesService.getScriptProperties().getProperty('phoneClockOuts') || '[]');
+    return isArray_(list) ? list.filter(function (e) { return e && typeof e === 'object' && e.id; }) : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+// Keeps the last few days only, so the property stays small.
+function savePhoneClockOuts_(list) {
+  var oldest = addDays_(todayIn_(userTz_(getMeta_())), -PHONE_OUT_KEEP_DAYS);
+  var kept = list.filter(function (e) { return String(e.date) >= oldest; });
+  PropertiesService.getScriptProperties().setProperty('phoneClockOuts', JSON.stringify(kept));
+}
+
+function markClockOutsTaken_(ids) {
+  var wanted = {};
+  for (var i = 0; i < ids.length; i++) wanted[String(ids[i])] = true;
+  var list = phoneClockOuts_();
+  var taken = 0;
+  var now = new Date().toISOString();
+  for (var j = 0; j < list.length; j++) {
+    if (!list[j].applied && wanted[list[j].id] === true) {
+      list[j].applied = now;
+      taken++;
+    }
+  }
+  if (taken > 0) savePhoneClockOuts_(list);
+  return taken;
+}
+
+// What the phone page is told about a clock-out: whether the PC has it and until when Undo works.
+function phoneClockOutView_(e) {
+  return {
+    id: e.id, date: e.date, clockOut: e.clockOut, taken: !!e.applied,
+    undoUntil: e.applied ? '' : new Date(new Date(e.at).getTime() + PHONE_OUT_UNDO_MS).toISOString()
+  };
+}
+
+function phoneClockOutViews_() {
+  var list = phoneClockOuts_();
+  var out = [];
+  for (var i = 0; i < list.length; i++) out.push(phoneClockOutView_(list[i]));
+  return out;
 }
 
 // The next OLDER_LOG_DAYS days that have logs before beforeDate, read from WorkPulse_Logs (newest first).

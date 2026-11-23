@@ -18,7 +18,7 @@ You need the Google Sheet you already sync logs to, with its script. A phone and
 4. Google asks for permission again. Allow all of it: the Sheet, sending email to you, and running timers (the daily one and
    the one-off ones that send a standup email later).
    (If a screen says the app is not verified, choose Advanced and continue; it is your own script.)
-5. Back in WorkPulse, **Settings > Phone & evening email**. The section should say the script is version 9.
+5. Back in WorkPulse, **Settings > Phone & evening email**. The section should say the script is version 10.
    If it says an older version, the paste or the new version in step 3 did not take; repeat them.
 6. Press **Set PIN** and type a 4-digit PIN twice. WorkPulse keeps only a token for this computer, never the PIN.
 7. Choose the time for the evening email (from 00:30 to 23:29), tick **Send me an evening email**, press **Save**, then
@@ -40,6 +40,26 @@ Notes:
   `WorkPulse_Projects`, from version 4 `WorkPulse_Backup`, and from version 6 `WorkPulse_DayHistory` and `WorkPulse_Standups`).
   `WorkPulse_Logs` keeps its columns and gains an `Origin` column at the end (version 6; `auto` for a log WorkPulse wrote itself).
   Do not edit the new tabs; WorkPulse rewrites them.
+
+## Updating to script version 10
+
+Version 10 adds **Clock out** to the phone page. Update the script with the same steps as for version 8 below (paste,
+then a **New version** of the existing deployment); Settings shows a notice until the Sheet runs version 10.
+
+- The phone page shows a **Clock out** button in the green band while the day is open in the Sheet: today, or yesterday
+  when today has no clock-in yet (working past midnight). It asks for the time you left (now by default; a past time
+  must be after the clock-in) and shows the worked time before you confirm.
+- The Sheet closes the day **at once**, so the day's email still goes when the PC is off. It keeps the clock-out until
+  WorkPulse on the PC takes it (within a minute while WorkPulse runs, or at its next start). The PC then closes the same
+  day at that time and pauses any running timer there, with a message and **Resume** as usual.
+- **The first clock-out wins.** If the PC already clocked out (by hand, End my day or the automatic clock-out), the PC's
+  time stays and the phone's is dropped.
+- **Undo** on the phone works for 10 minutes and only until the PC has taken the clock-out. After that, use **Resume**
+  on the PC.
+- The "when I clock out" email waits for the PC, so the PC can send its logs and standup first: until the PC takes the
+  clock-out, at most 60 minutes, then the Sheet sends with its own standup. Once the PC has it, the usual 10 minutes.
+- **Settings > Phone & evening email > Allow clock out from the phone** (on unless switched off). When off, the phone
+  page hides the button and the Sheet refuses the request. Only the PC can switch it, so a PIN on its own cannot.
 
 ## Updating to script version 9
 
@@ -120,8 +140,8 @@ cleared browser or a dead computer does not lose it.
 
 The automated tests use fakes for Google. Do these once against the real Sheet, and tick them off.
 
-1. **Version.** WorkPulse Settings > Phone & evening email says script version 9 (or open the `/exec` link with
-   `?action=ping`; it answers `"version":9`).
+1. **Version.** WorkPulse Settings > Phone & evening email says script version 10 (or open the `/exec` link with
+   `?action=ping`; it answers `"version":10`).
 2. **Same URL.** After step 3 above the link in WorkPulse still works with no change. (Editing the existing
    deployment keeps the URL; **New deployment** would not.)
 3. **Phone page opens.** `<your /exec link>?page=phone` shows the PIN keypad. A wrong PIN says so and counts the
@@ -145,7 +165,10 @@ The automated tests use fakes for Google. Do these once against the real Sheet, 
     **Triggers** list shows a one-off trigger for `sendEveningEmail`, the email arrives once, and the trigger is gone afterwards.
 13. **Log from the phone.** On the phone page, Add tab, **Log work done outside the office**: the log shows under Log
     right away and as a row in `WorkPulse_Logs`.
-14. **Google's script runner on the phone.** `google.script.run` works from the phone page that opens without a
+14. **Clock out from the phone.** With the day open, press **Clock out** on the phone and confirm. `WorkPulse_Days`
+    shows the clock-out at once; within about a minute WorkPulse on the PC shows "Clocked out from your phone at …" and
+    the band shows the day closed. Try **Undo** once within 10 minutes before the PC is running: the day opens again.
+15. **Google's script runner on the phone.** `google.script.run` works from the phone page that opens without a
     Google sign-in, and the remembered PIN survives a page reload on iPhone Safari and on Android Chrome. This is
     best effort: if a browser forgets the PIN, typing it each time is acceptable.
 

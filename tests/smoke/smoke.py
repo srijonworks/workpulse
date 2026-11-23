@@ -235,12 +235,13 @@ class ScriptStub:
     sendTestEmail. `inbox` items are served until acked, unless `serve_again` (an ack that was lost: the same items
     come back on the next pull). `calls` holds (action, payload) in order."""
 
-    def __init__(self, s, version=3, inbox=None, serve_again=False, versions=None, backup_text=""):
+    def __init__(self, s, version=3, inbox=None, serve_again=False, versions=None, backup_text="", clock_outs=None):
         self.version, self.serve_again = version, serve_again
         self.versions, self.backup_text = list(versions or []), backup_text
         self.fail_push = False  # True: pushState answers with an error, like a Sheet that cannot be reached
         self.guard = s.sheets
         self.inbox = list(inbox or [])
+        self.clock_outs = list(clock_outs or [])  # phone clock-outs (version 10), served until acked
         self.calls, self.taken = [], set()
         s.page.route("**/api/sheets/proxy", s.sheets.stub(self.handle))
 
@@ -264,9 +265,11 @@ class ScriptStub:
         elif action == "setPin":
             res = {"status": "ok", "token": PHONE_TOKEN}
         elif action == "pullInbox":
-            res = {"status": "ok", "items": [i for i in self.inbox if self.serve_again or i["id"] not in self.taken]}
+            res = {"status": "ok", "items": [i for i in self.inbox if self.serve_again or i["id"] not in self.taken],
+                   "clockOuts": [c for c in self.clock_outs if c["id"] not in self.taken]}
         elif action == "ackInbox":
             self.taken.update(p.get("ids", []))
+            self.taken.update(p.get("clockOutIds", []))
             res = {"status": "ok", "taken": len(p.get("ids", []))}
         elif action == "pushState" and self.fail_push:
             res = {"status": "error", "code": "error", "message": "The Sheet could not be reached (smoke stub)."}
@@ -2037,6 +2040,30 @@ def phone_inbox_pull(s):
     assert pushes and pushes[-1]["token"] == PHONE_TOKEN, "no state was sent to the Sheet with the token"
     assert all("pin" not in sent for _, sent in stub.calls), "a PIN was sent in a desktop call"
     assert PHONE_TOKEN not in p.locator("body").inner_text(), "the token is shown on the page"
+    s.no_errors()
+
+
+@check("phone_clock_out_pull")
+def phone_clock_out_pull(s):
+    """Script version 10: a clock-out made on the phone closes the same open day on this computer once, pauses the running
+    timer at that time, is acknowledged with clockOutIds, and a day already closed here keeps its own time."""
+    p = s.page
+    today = s.day(0)
+    clock_in = f"{today}T00:01:00.000Z"
+    clock_out = f"{today}T00:05:00.000Z"
+    s.set_ls("workpulse_workdays", {today: {"clockIn": clock_in}})
+    stub = ScriptStub(s, version=10, clock_outs=[{"id": "po-smoke0001", "date": today, "clockIn": clock_in, "clockOut": clock_out}])
+    _link_phone(s)
+    s.reload()
+    _wait_for(s, lambda: (s.ls("workpulse_workdays") or {}).get(today, {}).get("clockOut") == clock_out)
+    assert s.ls("workpulse_workdays")[today]["clockOut"] == clock_out, "the phone clock-out was not applied"
+    _wait_for(s, lambda: stub.payloads("ackInbox"))
+    acks = stub.payloads("ackInbox")
+    assert acks and acks[0].get("clockOutIds") == ["po-smoke0001"], f"the clock-out was not acknowledged: {acks}"
+    expect(p.get_by_text(re.compile(r"Clocked out from your phone at"))).to_be_visible(timeout=5000)
+    # the snapshot tells the Sheet the switch is on (absent = on)
+    _wait_for(s, lambda: stub.payloads("pushState"), tries=100)
+    assert stub.payloads("pushState")[-1].get("phoneClockOut") is True, "the push did not carry phoneClockOut"
     s.no_errors()
 
 

@@ -163,7 +163,7 @@ describe('script v4: sheet backup', () => {
   it('keeps the version 3 phone actions working', () => {
     const h = createScriptHarness();
     const token = withToken(h);
-    expect(h.get({ action: 'ping' })).toMatchObject({ version: 9 });
-    expect(h.call('pullInbox', { token })).toEqual({ status: 'ok', items: [] });
+    expect(h.get({ action: 'ping' })).toMatchObject({ version: 10 });
+    expect(h.call('pullInbox', { token })).toEqual({ status: 'ok', items: [], clockOuts: [] });
   });
 });
