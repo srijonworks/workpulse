@@ -28,4 +28,6 @@ contextBridge.exposeInMainWorld('workpulseDesktop', {
   setSheetPending: (pending) => ipcRenderer.send('wp:sheet-pending', pending === true),
   onFinalPush: (cb) => listen('wp:final-push', cb),
   finalPushed: () => ipcRenderer.send('wp:final-pushed'),
+  // seconds since the last keyboard or mouse input anywhere on the PC (for the automatic clock-out)
+  getIdleSeconds: () => ipcRenderer.invoke('wp:idle-seconds'),
 });

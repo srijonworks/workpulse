@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const KEYS = [
   'isDesktop', 'pushState', 'setWidgets', 'onState', 'command', 'onCommand',
   'getUpdateState', 'checkForUpdates', 'installUpdate', 'onUpdateState', 'onFlush', 'flushed',
-  'setSheetPending', 'onFinalPush', 'finalPushed',
+  'setSheetPending', 'onFinalPush', 'finalPushed', 'getIdleSeconds',
 ];
 
 describe('preload parity', () => {

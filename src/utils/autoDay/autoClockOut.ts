@@ -20,18 +20,26 @@ export function decideAutoClockOut(o: {
   workdays: Workdays;
   today: string;
   nowMs: number;
-  /** The last time anything on this PC was in use today (page input, activity found). Null when unknown. */
+  /** The last time anything on this PC was in use (input anywhere when the desktop shell knows it, else this window's input; activity found). Null when unknown. */
   lastActivityMs: number | null;
+  /** True when lastActivityMs covers input anywhere on the PC (the desktop shell). In a browser only this window's input is
+   *  known, and a quiet window does not prove the person left: the clock-out is then never stamped more than an hour back. */
+  wholePc?: boolean;
+  /** The last activity seen in this run, per local date (the day before midnight, for a day still open after it). */
+  activityByDate?: Record<string, number>;
   /** The last heartbeat of the previous run: when the app was last alive before it started now. */
   lastAliveMs: number | null;
   hours: number;
   busy: BusyWindow[];
 }): ClockOutDecision {
-  // An earlier day that was never closed: stamp it at the last time the PC was alive, never past 23:59 of that day.
+  // An earlier day that was never closed: stamp it at the last time the PC was alive (the previous run's heartbeat) or in use
+  // on that date in this run (the app ran past midnight), never past 23:59 of that day.
   const stale = Object.keys(o.workdays).filter((d) => d < o.today && !o.workdays[d].clockOut).sort();
   for (const date of stale) {
     const inMs = Date.parse(o.workdays[date].clockIn);
-    const alive = o.lastAliveMs !== null && localDateOfIso(new Date(o.lastAliveMs).toISOString()) >= date ? o.lastAliveMs : null;
+    const prevRun = o.lastAliveMs !== null && localDateOfIso(new Date(o.lastAliveMs).toISOString()) >= date ? o.lastAliveMs : null;
+    const thisRun = o.activityByDate?.[date] ?? null;
+    const alive = prevRun === null ? thisRun : thisRun === null ? prevRun : Math.max(prevRun, thisRun);
     const atMs = Math.min(Math.max(alive ?? inMs, inMs), endOfDayCap(date));
     return { action: 'clock-out', date, atMs };
   }
@@ -43,6 +51,7 @@ export function decideAutoClockOut(o: {
   if (clockState(rec, o.hours, o.nowMs).leftSec > 0) return { action: 'none' };
   if (o.nowMs - o.lastActivityMs < IDLE_BEFORE_CLOCK_OUT_MS) return { action: 'none' };
   if (isBusyAt(o.busy, o.nowMs)) return { action: 'none' };
-  const atMs = Math.min(Math.max(o.lastActivityMs, inMs), endOfDayCap(o.today));
+  const floor = o.wholePc ? inMs : Math.max(inMs, o.nowMs - IDLE_BEFORE_CLOCK_OUT_MS);
+  const atMs = Math.min(Math.max(o.lastActivityMs, floor), endOfDayCap(o.today));
   return { action: 'clock-out', date: o.today, atMs };
 }

@@ -37,9 +37,27 @@ describe('decideAutoClockOut', () => {
 
   it('closes today only when the target is done and the PC was idle for an hour, at the last activity', () => {
     const last = at('2026-11-16T17:10:00');
-    expect(decideAutoClockOut({ ...base, workdays: open, nowMs: at('2026-11-16T18:20:00'), lastActivityMs: last })).toEqual({ action: 'clock-out', date: '2026-11-16', atMs: last });
+    expect(decideAutoClockOut({ ...base, workdays: open, nowMs: at('2026-11-16T18:20:00'), lastActivityMs: last, wholePc: true })).toEqual({ action: 'clock-out', date: '2026-11-16', atMs: last });
     expect(decideAutoClockOut({ ...base, workdays: open, nowMs: at('2026-11-16T17:50:00'), lastActivityMs: last })).toEqual({ action: 'none' }); // idle 40 min
     expect(decideAutoClockOut({ ...base, workdays: open, nowMs: at('2026-11-16T15:00:00'), lastActivityMs: at('2026-11-16T13:00:00') })).toEqual({ action: 'none' }); // target not done
+  });
+
+  it('without the PC-wide idle time (a browser), never stamps more than an hour back: a quiet window is not proof of leaving', () => {
+    // Window last touched at 09:05, the app in the tray all day: the old rule closed the day at 09:05.
+    const out = decideAutoClockOut({ ...base, workdays: open, nowMs: at('2026-11-16T17:30:00'), lastActivityMs: at('2026-11-16T09:05:00') });
+    expect(out).toEqual({ action: 'clock-out', date: '2026-11-16', atMs: at('2026-11-16T16:30:00') });
+    // With the PC-wide idle time, input anywhere keeps the day open, and the stamp is the real last input.
+    expect(decideAutoClockOut({ ...base, workdays: open, nowMs: at('2026-11-16T17:30:00'), lastActivityMs: at('2026-11-16T17:29:00'), wholePc: true })).toEqual({ action: 'none' });
+    expect(decideAutoClockOut({ ...base, workdays: open, nowMs: at('2026-11-16T19:15:00'), lastActivityMs: at('2026-11-16T18:10:00'), wholePc: true })).toEqual({ action: 'clock-out', date: '2026-11-16', atMs: at('2026-11-16T18:10:00') });
+  });
+
+  it('closes a day still open at midnight at its last activity in this run, not at its clock-in', () => {
+    const wd = { '2026-11-15': { clockIn: '2026-11-15T03:00:00Z' } };
+    // The app ran through the night; the previous run's heartbeat is from the day before.
+    const o = { ...base, workdays: wd, nowMs: at('2026-11-16T00:01:00'), lastActivityMs: at('2026-11-16T00:00:30'), lastAliveMs: at('2026-11-14T18:00:00') };
+    expect(decideAutoClockOut({ ...o, activityByDate: { '2026-11-15': at('2026-11-15T23:40:00'), '2026-11-16': at('2026-11-16T00:00:30') } })).toEqual({ action: 'clock-out', date: '2026-11-15', atMs: at('2026-11-15T23:40:00') });
+    // This morning's activity says nothing about a day forgotten yesterday.
+    expect(decideAutoClockOut({ ...o, activityByDate: { '2026-11-16': at('2026-11-16T00:00:30') } })).toMatchObject({ atMs: Date.parse('2026-11-15T03:00:00Z') });
   });
 
   it('never fires inside a meeting, and does nothing for a day already closed', () => {

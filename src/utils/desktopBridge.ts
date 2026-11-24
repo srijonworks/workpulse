@@ -30,6 +30,8 @@ export interface DesktopBridge {
   /** Windows is shutting down and the Sheet is behind: push now, then call `finalPushed` (the shell waits a few seconds at most). */
   onFinalPush(cb: () => void): () => void;
   finalPushed(): void;
+  /** Seconds since the last keyboard or mouse input anywhere on the PC; null when unknown. Absent in an older shell. */
+  getIdleSeconds?(): Promise<number | null>;
 }
 
 export function desktopBridge(): DesktopBridge | null {

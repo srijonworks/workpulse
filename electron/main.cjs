@@ -500,6 +500,15 @@ const cleanConfig = (c) => {
   return { time: one(c && c.time), tasks: one(c && c.tasks) };
 };
 
+// How long the whole PC has had no keyboard or mouse input, in seconds (the automatic clock-out's idle check). Null when unknown.
+ipcMain.handle('wp:idle-seconds', (event) => {
+  if (!fromOurPage(event)) return null;
+  try {
+    return require('electron').powerMonitor.getSystemIdleTime();
+  } catch {
+    return null;
+  }
+});
 ipcMain.on('wp:widget-config', (event, config) => {
   if (fromOurPage(event)) applyWidgets(cleanConfig(config));
 });

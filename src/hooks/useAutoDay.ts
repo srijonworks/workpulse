@@ -8,6 +8,7 @@ import { decideAutoClockOut } from '../utils/autoDay/autoClockOut';
 import { busyWindows } from '../utils/autoDay/busy';
 import { decideStartPrompt } from '../utils/autoDay/startPrompt';
 import { localDateStr } from '../utils/dates';
+import { desktopBridge } from '../utils/desktopBridge';
 import { DEFAULT_WORKDAY_HOURS } from '../utils/workday';
 
 // The automatic parts of the office clock: the start-of-day popup, and the safety-net clock-out. The decisions are in
@@ -16,6 +17,8 @@ import { DEFAULT_WORKDAY_HOURS } from '../utils/workday';
 
 const TICK_MS = 60_000;
 const WEEKEND_SCAN_MS = 10 * 60_000;
+/** Before an automatic clock-out, today's git, AI and file activity is read again if the last read is older than this. */
+const CLOCK_OUT_SCAN_MS = 10 * 60_000;
 const NOTICE_KEY = 'workpulse_activity_notice';
 const DISMISSED_KEY = 'workpulse_autoday_dismissed';
 
@@ -45,11 +48,16 @@ export function useAutoDay(args: {
   latest.current = args;
   const lastActivity = useRef<number | null>(null);
   const realWorkAt = useRef<number | null>(null);
+  // The latest activity item (commit, AI prompt, changed file) found today, and when that was last read.
+  const scanned = useRef<{ date: string; latestMs: number | null; readAtMs: number }>({ date: '', latestMs: null, readAtMs: 0 });
+  // The last activity seen in this run per local date, so a day still open at midnight closes at its real end.
+  const byDate = useRef<Record<string, number>>({});
   const [dismissed, setDismissed] = useState<string | null>(readDismissed);
   const dismissedRef = useRef(dismissed);
   dismissedRef.current = dismissed;
 
-  // Someone is using the PC: any input in this window. (The window can be in the tray; the readers cover the rest.)
+  // Someone is using the PC: any input in this window. (The window is often in the tray: the decision below also uses the
+  // desktop shell's PC-wide idle time and today's activity items.)
   useEffect(() => {
     if (!args.enabled) return;
     lastActivity.current = Date.now();
@@ -104,20 +112,91 @@ export function useAutoDay(args: {
   // The decisions, every minute and when the window comes back.
   useEffect(() => {
     if (!args.enabled) return;
-    const tick = () => {
-      const a = latest.current;
+    let cancelled = false;
+    let running = false;
+    // Seconds since the last input anywhere on the PC, from the desktop shell; null in a browser or on failure.
+    const pcIdleSeconds = async (): Promise<number | null> => {
+      const bridge = desktopBridge();
+      if (!bridge?.getIdleSeconds) return null;
+      try {
+        const v = await bridge.getIdleSeconds();
+        return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
+      } catch {
+        return null;
+      }
+    };
+    // Reads today's activity again and keeps the time of its latest item (never in the future).
+    const rescan = async (today: string, nowMs: number) => {
+      const { settings } = latest.current;
+      scanned.current = { ...scanned.current, readAtMs: nowMs };
+      const folders = settings.activityFolders ?? [];
+      let accepted = false;
+      try {
+        accepted = localStorage.getItem(NOTICE_KEY) === noticeSignature(sourcesFromSettings(settings), aiFromSettings(settings));
+      } catch {
+        accepted = false;
+      }
+      if (!accepted || folders.length === 0) return;
+      try {
+        const scan = await scanActivityApi({ date: today, folders, sources: sourcesFromSettings(settings) });
+        const times = scan.items.map((i) => Date.parse(i.time)).filter((t) => Number.isFinite(t) && t <= nowMs);
+        scanned.current = { date: today, latestMs: times.length > 0 ? Math.max(...times) : null, readAtMs: nowMs };
+      } catch {
+        // window input and the PC idle time still decide
+      }
+    };
+    const tick = async () => {
+      if (running) return;
+      running = true;
+      try {
+        await decide();
+      } finally {
+        running = false;
+      }
+    };
+    const decide = async () => {
+      const idleSec = await pcIdleSeconds();
+      if (cancelled) return;
       const now = new Date();
       const nowMs = now.getTime();
       const today = localDateStr(now);
-      const out = decideAutoClockOut({
-        workdays: a.workdays,
-        today,
-        nowMs,
-        lastActivityMs: lastActivity.current,
-        lastAliveMs: a.lastAliveMs,
-        hours: a.settings.workdayHours ?? DEFAULT_WORKDAY_HOURS,
-        busy: busyWindows(a.logs, today),
-      });
+      const activity = () => {
+        const seen = [lastActivity.current, idleSec === null ? null : nowMs - idleSec * 1000, scanned.current.date === today ? scanned.current.latestMs : null].filter(
+          (t): t is number => t !== null,
+        );
+        const ms = seen.length > 0 ? Math.max(...seen) : null;
+        if (ms !== null) {
+          const d = localDateStr(new Date(ms));
+          byDate.current = Object.fromEntries(
+            Object.entries({ ...byDate.current, [d]: Math.max(byDate.current[d] ?? 0, ms) })
+              .sort(([x], [y]) => (x < y ? -1 : 1))
+              .slice(-3),
+          );
+        }
+        return ms;
+      };
+      const ask = () => {
+        const a = latest.current;
+        return decideAutoClockOut({
+          workdays: a.workdays,
+          today,
+          nowMs,
+          lastActivityMs: activity(),
+          wholePc: idleSec !== null,
+          activityByDate: byDate.current,
+          lastAliveMs: a.lastAliveMs,
+          hours: a.settings.workdayHours ?? DEFAULT_WORKDAY_HOURS,
+          busy: busyWindows(a.logs, today),
+        });
+      };
+      let out = ask();
+      // Before closing today, look at today's commits, AI prompts and files once more: work outside this window counts.
+      if (out.action === 'clock-out' && out.date === today && nowMs - scanned.current.readAtMs >= CLOCK_OUT_SCAN_MS) {
+        await rescan(today, nowMs);
+        if (cancelled) return;
+        out = ask();
+      }
+      const a = latest.current;
       if (out.action === 'clock-out') {
         a.autoClockOut(out.date, new Date(out.atMs).toISOString());
         return; // the next tick looks at the next day
@@ -126,13 +205,14 @@ export function useAutoDay(args: {
       const start = decideStartPrompt({ workdays: a.workdays, today, nowMs, weekday: now.getDay(), realWorkAtMs: realWorkAt.current, dismissedDate: dismissedRef.current });
       if (start.action === 'show') a.openStartPrompt(new Date(start.suggestedMs).toISOString());
     };
-    const first = setTimeout(tick, 3_000);
-    const id = setInterval(tick, TICK_MS);
+    const first = setTimeout(() => void tick(), 3_000);
+    const id = setInterval(() => void tick(), TICK_MS);
     const onVisible = () => {
-      if (document.visibilityState === 'visible') tick();
+      if (document.visibilityState === 'visible') void tick();
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
+      cancelled = true;
       clearTimeout(first);
       clearInterval(id);
       document.removeEventListener('visibilitychange', onVisible);
