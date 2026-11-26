@@ -115,6 +115,19 @@ export const SHEET_SENDS_SCRIPT_VERSION = 8;
  * `when` and `geminiKey` need script version 8 (an older script ignores them, so only send them to version 8).
  * geminiKey: a text saves it in the script ('' removes it); left out keeps the saved one.
  */
+/** The first script version that takes Google's newer Gemini keys ('AQ.' with dots) and never fails the email save over a key. */
+export const DOTTED_KEY_SCRIPT_VERSION = 11;
+
+/**
+ * The Gemini key to send with setEmail, or undefined to leave it out (the script keeps the one it has). A script before
+ * version 11 rejects the whole save, timer included, over a key with a dot, so such a key is not sent to it.
+ */
+export function geminiKeyForScript(key: string | undefined, version: number): string | undefined {
+  const k = (key ?? '').trim();
+  if (version >= DOTTED_KEY_SCRIPT_VERSION || k === '' || /^[A-Za-z0-9_-]{10,200}$/.test(k)) return k;
+  return undefined;
+}
+
 export function setEmailSchedule(
   url: string,
   token: string,

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Check, Copy, ExternalLink, Loader2 } from 'lucide-react';
 import type { AppSettings } from '../../../types';
 import type { PhoneSyncStatus } from '../../../hooks/usePhoneSync';
-import { SHEET_SENDS_SCRIPT_VERSION, getScriptVersion, resetPhoneAccess, sendTestEmail, setEmailSchedule, setPhonePin } from '../../../utils/phoneApi';
+import { SHEET_SENDS_SCRIPT_VERSION, geminiKeyForScript, getScriptVersion, resetPhoneAccess, sendTestEmail, setEmailSchedule, setPhonePin } from '../../../utils/phoneApi';
 import { APPS_SCRIPT_SCOPES_SNIPPET, LATEST_SCRIPT_VERSION } from '../../../utils/googleAppsScriptTemplate';
 import { emailWhenOf, type EmailWhen } from '../../../utils/emailWhen';
 import { DEFAULT_EMAIL_TIME, cleanRecipients, emailTimeAllowed, parseEmailTime, phoneLink } from '../../../utils/phoneSettings';
@@ -239,11 +239,13 @@ export const PhoneEmailSection: React.FC<PhoneEmailSectionProps> = ({ settings, 
     // once still gets its email; it gets the Gemini key from Settings -> AI to write the standup when the PC's is not there.
     // An older script only knows the fixed time: "when I clock out" then sends no timer and the app sends the email.
     const sheetSends = typeof version === 'number' && version >= SHEET_SENDS_SCRIPT_VERSION;
+    const geminiKey = sheetSends ? geminiKeyForScript(settings.geminiApiKey, version) : undefined;
+    const keyHeldBack = sheetSends && geminiKey === undefined;
     const r = await setEmailSchedule(
       url,
       token,
       sheetSends
-        ? { enabled: emailOn, when: emailWhen, hour: time.hour, minute: time.minute, tz: zone(), to, geminiKey: settings.geminiApiKey?.trim() ?? '' }
+        ? { enabled: emailOn, when: emailWhen, hour: time.hour, minute: time.minute, tz: zone(), to, ...(geminiKey === undefined ? {} : { geminiKey }) }
         : { enabled: emailOn && fixed, hour: time.hour, minute: time.minute, tz: zone(), to },
     );
     setEmailBusy(null);
@@ -254,9 +256,15 @@ export const PhoneEmailSection: React.FC<PhoneEmailSectionProps> = ({ settings, 
     const hhmm = `${String(time.hour).padStart(2, '0')}:${String(time.minute).padStart(2, '0')}`;
     onUpdateSettings({ emailEnabled: emailOn, emailTime: hhmm, emailWhen, emailTo: to || undefined });
     setEmailTo(to);
+    const keyRejected = (r.data as { geminiKeyRejected?: unknown } | undefined)?.geminiKeyRejected === true;
+    const keyNote = keyHeldBack
+      ? ` Your Gemini key was not sent: script version ${version} cannot take this newer key format. Re-paste the script (version ${LATEST_SCRIPT_VERSION}) and save here again to let the Sheet use Gemini.`
+      : keyRejected
+        ? ' Your Gemini key was not saved in the Sheet because it does not look like a Gemini key; check it in Settings > AI.'
+        : '';
     setEmailResult({
       ok: true,
-      message: !emailOn
+      message: (!emailOn
         ? 'The daily email is off.'
         : fixed
           ? `The daily email is on. It arrives around ${hhmm} on days with a log or a clock-in.`
@@ -266,7 +274,7 @@ export const PhoneEmailSection: React.FC<PhoneEmailSectionProps> = ({ settings, 
                   ? 'If your PC has not sent its standup, the Sheet writes one with your Gemini key, or in plain wording when Gemini fails.'
                   : 'If your PC has not sent its standup, the Sheet writes one in plain wording (add a Gemini key in Settings > AI and save here again to let it use Gemini).'
               }`
-            : 'The daily email is on. It arrives a few minutes after you clock out. A day you forget is closed for you, and the email follows.',
+            : 'The daily email is on. It arrives a few minutes after you clock out. A day you forget is closed for you, and the email follows.') + keyNote,
     });
   };
 
@@ -428,7 +436,7 @@ export const PhoneEmailSection: React.FC<PhoneEmailSectionProps> = ({ settings, 
           </p>
           {version < LATEST_SCRIPT_VERSION && (
             <p role="alert" className="text-danger">
-              Your Sheet runs script version {version}; version {LATEST_SCRIPT_VERSION} is out (clock out from the phone). Re-paste the script
+              Your Sheet runs script version {version}; version {LATEST_SCRIPT_VERSION} is out (takes the newer Gemini keys; day emails count your logs when you use no tasks). Re-paste the script
               (Settings &gt; Google Sheet &gt; Copy code) and update your existing deployment (Deploy, Manage deployments, edit, New version).
             </p>
           )}

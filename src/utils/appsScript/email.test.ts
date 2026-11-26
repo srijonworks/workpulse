@@ -232,6 +232,30 @@ describe('evening email: content', () => {
     expect(full.html).toContain('Sent by your WorkPulse script at 18:00 (Asia/Dhaka)');
     expect(h.mails).toHaveLength(0);
   });
+
+  it('a day of logs alone shows things done and projects, not "0 tasks done" (version 12)', () => {
+    const logs = [{ ...MOCKUP_LOGS[0], subTasks: ['Filter by team', 'Fix timezone', 'Add export'] }, ...MOCKUP_LOGS.slice(1)];
+    const { h } = evening({ logs, tasks: [] });
+    h.run('sendEveningEmail');
+    const { htmlBody: html, body: text } = h.mails[0];
+    // 3 sub-tasks on the first log, 1 for each of the other 4 logs; 3 projects.
+    expect(html).toMatch(/>7<\/[^>]+>(?:<[^>]+>)*things done</);
+    expect(html).toMatch(/>3<\/[^>]+>(?:<[^>]+>)*projects</);
+    expect(html).not.toContain('tasks done');
+    expect(html).not.toContain('still open');
+    expect(html).toContain('7 things done, 3 projects');
+    expect(text).not.toContain('STILL OPEN');
+  });
+
+  it('a day with tasks keeps the task tiles', () => {
+    const { h } = evening();
+    h.run('sendEveningEmail');
+    const { htmlBody: html, body: text } = h.mails[0];
+    expect(html).toContain('task done');
+    expect(html).toContain('still open');
+    expect(html).not.toContain('things done');
+    expect(text).toContain('STILL OPEN');
+  });
 });
 
 describe('evening email: when it is sent', () => {

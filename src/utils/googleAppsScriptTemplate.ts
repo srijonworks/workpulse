@@ -5,7 +5,7 @@ import { SCRIPT_BACKUP } from './appsScript/backup';
 
 const HEADER = `/**
  * =========================================================================
- * WorkPulse - Google Sheets Sync Backend (version 10)
+ * WorkPulse - Google Sheets Sync Backend (version 12)
  * =========================================================================
  *
  * INSTRUCTIONS TO DEPLOY (first time):

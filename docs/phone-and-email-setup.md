@@ -18,7 +18,7 @@ You need the Google Sheet you already sync logs to, with its script. A phone and
 4. Google asks for permission again. Allow all of it: the Sheet, sending email to you, and running timers (the daily one and
    the one-off ones that send a standup email later).
    (If a screen says the app is not verified, choose Advanced and continue; it is your own script.)
-5. Back in WorkPulse, **Settings > Phone & evening email**. The section should say the script is version 10.
+5. Back in WorkPulse, **Settings > Phone & evening email**. The section should say the script is version 12.
    If it says an older version, the paste or the new version in step 3 did not take; repeat them.
 6. Press **Set PIN** and type a 4-digit PIN twice. WorkPulse keeps only a token for this computer, never the PIN.
 7. Choose the time for the evening email (from 00:30 to 23:29), tick **Send me an evening email**, press **Save**, then
@@ -40,6 +40,23 @@ Notes:
   `WorkPulse_Projects`, from version 4 `WorkPulse_Backup`, and from version 6 `WorkPulse_DayHistory` and `WorkPulse_Standups`).
   `WorkPulse_Logs` keeps its columns and gains an `Origin` column at the end (version 6; `auto` for a log WorkPulse wrote itself).
   Do not edit the new tabs; WorkPulse rewrites them.
+
+## Updating to script version 12
+
+Version 12 changes the top of the day emails for a day run on logs alone (most of them automatic). When the day has
+no done and no open tasks, the tiles read **logged**, **things done** (each log's sub-tasks, or 1 for a log without
+any) and **projects**, instead of "0 tasks done" and "0 still open", and the text email leaves out the empty
+"Still open" part. A day with tasks shows the task tiles as before. Update the script with the same steps as for
+version 8 below. It also includes version 11.
+
+## Updating to script version 11
+
+Version 11 takes Google's newer Gemini keys (they start with `AQ.` and contain dots). Version 10 and older refused
+**Save email settings** with "That Gemini key does not look right." whenever such a key was set in Settings > AI, so the
+Sheet's 15-minute email timer was never set up and the clock-out email waited for the PC. From version 11 a key that
+still does not fit is only left unsaved; the email settings and the timer always save. Update the script as below, then
+press **Save email settings** once. Until you update, WorkPulse does not send a dotted key to the older script, so the
+save (and the timer) works there too, and the Sheet writes its standups in plain wording.
 
 ## Updating to script version 10
 
@@ -140,8 +157,8 @@ cleared browser or a dead computer does not lose it.
 
 The automated tests use fakes for Google. Do these once against the real Sheet, and tick them off.
 
-1. **Version.** WorkPulse Settings > Phone & evening email says script version 10 (or open the `/exec` link with
-   `?action=ping`; it answers `"version":10`).
+1. **Version.** WorkPulse Settings > Phone & evening email says script version 12 (or open the `/exec` link with
+   `?action=ping`; it answers `"version":11`).
 2. **Same URL.** After step 3 above the link in WorkPulse still works with no change. (Editing the existing
    deployment keeps the URL; **New deployment** would not.)
 3. **Phone page opens.** `<your /exec link>?page=phone` shows the PIN keypad. A wrong PIN says so and counts the

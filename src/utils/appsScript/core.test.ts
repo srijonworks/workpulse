@@ -36,11 +36,11 @@ const snapshot = (over: Record<string, unknown> = {}) => ({
 });
 
 describe('script v3: existing behaviour', () => {
-  it('ping reports version 10 on GET and POST', () => {
+  it('ping reports version 12 on GET and POST', () => {
     const h = createScriptHarness();
-    expect(h.get({ action: 'ping' })).toMatchObject({ status: 'ok', version: 10 });
-    expect(h.get({})).toMatchObject({ status: 'ok', version: 10 });
-    expect(h.call('ping')).toMatchObject({ status: 'ok', version: 10 });
+    expect(h.get({ action: 'ping' })).toMatchObject({ status: 'ok', version: 12 });
+    expect(h.get({})).toMatchObject({ status: 'ok', version: 12 });
+    expect(h.call('ping')).toMatchObject({ status: 'ok', version: 12 });
   });
 
   it('appendLog still upserts by Id into the 12 log columns', () => {

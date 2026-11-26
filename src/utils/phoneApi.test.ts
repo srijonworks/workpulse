@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
+  geminiKeyForScript,
   pullInbox,
   pushState,
   ackInbox,
@@ -316,5 +317,17 @@ describe('phoneApi: history and standup emails (script version 6)', () => {
     expect((await cancelDayEmail(URL_, 'tok', day)).data?.cancelled).toBe(true);
     stubFetch(() => reply({ status: 'error', code: 'busy', message: 'The Sheet is busy with another update.' }));
     expect(await cancelDayEmail(URL_, 'tok', day)).toMatchObject({ ok: false, code: 'busy', retryable: true });
+  });
+});
+
+describe('geminiKeyForScript', () => {
+  const dotted = 'AQ.Ab8RN6' + 'x'.repeat(44);
+  it('holds a dotted key back from a script before version 11, which would refuse the whole save', () => {
+    expect(geminiKeyForScript(dotted, 10)).toBeUndefined();
+    expect(geminiKeyForScript(dotted, 11)).toBe(dotted);
+  });
+  it('sends a classic key, and an empty one (removes it), to any version', () => {
+    expect(geminiKeyForScript(' AIzaSy' + 'x'.repeat(33) + ' ', 8)).toBe('AIzaSy' + 'x'.repeat(33));
+    expect(geminiKeyForScript(undefined, 8)).toBe('');
   });
 });

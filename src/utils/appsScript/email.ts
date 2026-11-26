@@ -30,6 +30,8 @@ var GEMINI_MODELS = ${JSON.stringify(GEMINI_MODEL_CASCADE)};
 
 // ---- Desktop actions ----
 
+var GEMINI_KEY_PATTERN = /^[A-Za-z0-9_.\-]{10,200}$/;
+
 // { token, enabled, hour, minute, tz, to?, when?, geminiKey? }: when 'fixed' (or absent, as before version 8) one daily
 // trigger at the hour; when 'clockout' one trigger every 15 minutes that sends each closed day (sweepStandups_). None when off.
 // geminiKey: a text saves it ('' removes it), absent keeps the saved one. It is never sent back.
@@ -49,7 +51,10 @@ function setEmailAction_(c) {
   if (hasTo && to === null) return badRequest_('Enter an email address, or several separated by commas (at most 5).');
   var hasKey = typeof c.geminiKey === 'string';
   var key = hasKey ? c.geminiKey.replace(/^\s+|\s+$/g, '') : '';
-  if (hasKey && key !== '' && !/^[A-Za-z0-9_\-]{10,200}$/.test(key)) return badRequest_('That Gemini key does not look right.');
+  // Google's keys are 'AIza...' or, from 2026, 'AQ.' with dots (version 11). A key that still does not fit is not saved (the
+  // saved one stays) and is reported in geminiKeyRejected, but never stops the email settings and their timer from saving.
+  var keyRejected = hasKey && key !== '' && !GEMINI_KEY_PATTERN.test(key);
+  if (keyRejected) hasKey = false;
   if (c.enabled && clockout) {
     if (!validZone_(tz)) return badRequest_('That time zone is not known.');
   } else if (c.enabled) {
@@ -90,7 +95,7 @@ function setEmailAction_(c) {
       else if (hasKey) props.deleteProperty('geminiKey');
       return {
         status: 'ok', enabled: !!saved.enabled, when: saved.when === 'clockout' ? 'clockout' : 'fixed', hour: saved.hour, minute: saved.minute,
-        tz: saved.tz, to: saved.to || '', geminiKey: !!props.getProperty('geminiKey')
+        tz: saved.tz, to: saved.to || '', geminiKey: !!props.getProperty('geminiKey'), geminiKeyRejected: keyRejected
       };
     });
   } catch (error) {
@@ -1202,6 +1207,20 @@ function meter_(pct, fill, track, height, top, radius) {
 }
 
 // The row of three figures under the header: [{ value, label }].
+// The task tiles show only on a day that has done or open tasks; a day of logs alone shows what the logs did.
+function usesTasks_(m) {
+  return m.done.length > 0 || m.openCount > 0;
+}
+
+// Each log counts its sub-tasks, or 1 when it has none.
+function thingsDone_(groups) {
+  var n = 0;
+  for (var g = 0; g < groups.length; g++) {
+    for (var k = 0; k < groups[g].logs.length; k++) n += Math.max(1, (groups[g].logs[k].subTasks || []).length);
+  }
+  return n;
+}
+
 function statsRow_(items) {
   var cells = [];
   for (var i = 0; i < items.length; i++) {
@@ -1517,12 +1536,26 @@ function emailHtml_(m) {
     h.push(headerRow_(esc_(m.dayLong), esc_(fmtHM_(m.worked)),
       over > 0 ? 'worked, ' + esc_(fmtHM_(over)) + ' over ' + esc_(fmtHM_(m.target)) : 'worked of ' + esc_(fmtHM_(m.target)),
       m.target > 0 ? (m.worked / m.target) * 100 : 0, cells, line));
-    h.push(statsRow_([
-      { value: esc_(fmtHM_(m.logMinutes)), label: m.logCount === 1 ? 'logged in 1 entry' : 'logged in ' + m.logCount + ' entries' },
-      { value: String(m.done.length), label: m.done.length === 1 ? 'task done' : 'tasks done' },
-      { value: String(m.openCount), label: 'still open' }
-    ]));
-    preview = fmtHM_(m.worked) + ' worked of ' + fmtHM_(m.target) + ', ' + m.done.length + ' done, ' + m.openCount + ' still open';
+    var logged = { value: esc_(fmtHM_(m.logMinutes)), label: m.logCount === 1 ? 'logged in 1 entry' : 'logged in ' + m.logCount + ' entries' };
+    if (usesTasks_(m)) {
+      h.push(statsRow_([
+        logged,
+        { value: String(m.done.length), label: m.done.length === 1 ? 'task done' : 'tasks done' },
+        { value: String(m.openCount), label: 'still open' }
+      ]));
+      preview = fmtHM_(m.worked) + ' worked of ' + fmtHM_(m.target) + ', ' + m.done.length + ' done, ' + m.openCount + ' still open';
+    } else {
+      // A day run on logs alone (most of them automatic) counts what the logs did, not an empty task list (version 12).
+      var things = thingsDone_(m.groups);
+      var projects = m.groups.length;
+      h.push(statsRow_([
+        logged,
+        { value: String(things), label: things === 1 ? 'thing done' : 'things done' },
+        { value: String(projects), label: projects === 1 ? 'project' : 'projects' }
+      ]));
+      preview = fmtHM_(m.worked) + ' worked of ' + fmtHM_(m.target) + ', ' + things + (things === 1 ? ' thing' : ' things') + ' done, ' +
+        projects + (projects === 1 ? ' project' : ' projects');
+    }
   }
 
   var top = 34;
@@ -1628,9 +1661,11 @@ function emailText_(m) {
       for (var su = 0; su < subs.length; su++) t.push('      - ' + plain_(subs[su]));
     }
   }
-  t.push('');
-  t.push('STILL OPEN \u00b7 ' + m.openCount);
-  if (m.openGroups.length === 0) t.push('Nothing open.');
+  if (usesTasks_(m)) {
+    t.push('');
+    t.push('STILL OPEN \u00b7 ' + m.openCount);
+    if (m.openGroups.length === 0) t.push('Nothing open.');
+  }
   for (var o = 0; o < m.openGroups.length; o++) {
     t.push(m.openGroups[o].label);
     for (var q = 0; q < m.openGroups[o].tasks.length; q++) {

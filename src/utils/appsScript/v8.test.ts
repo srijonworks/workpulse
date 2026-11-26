@@ -68,7 +68,17 @@ describe('script v8: setEmail', () => {
     expect(h.call('setEmail', { token, enabled: true, when: 'clockout', tz: DHAKA }).geminiKey).toBe(true); // absent = kept
     expect(h.call('setEmail', { token, enabled: true, when: 'clockout', tz: DHAKA, geminiKey: '' }).geminiKey).toBe(false);
     expect(h.props.geminiKey).toBeUndefined();
-    expect(h.call('setEmail', { token, enabled: true, when: 'clockout', tz: DHAKA, geminiKey: 'bad key!' }).code).toBe('bad_request');
+  });
+
+  it('takes the newer dotted Gemini keys, and a bad key never blocks the timer (version 11)', () => {
+    const { h, token } = setup('2026-11-18T03:00:00Z');
+    const dotted = 'AQ.Ab8RN6' + 'x'.repeat(44);
+    expect(h.call('setEmail', { token, enabled: true, when: 'clockout', tz: DHAKA, geminiKey: dotted })).toMatchObject({ status: 'ok', geminiKey: true, geminiKeyRejected: false });
+    expect(h.props.geminiKey).toBe(dotted);
+    const r = h.call('setEmail', { token, enabled: true, when: 'clockout', tz: DHAKA, geminiKey: 'bad key!' });
+    expect(r).toMatchObject({ status: 'ok', when: 'clockout', geminiKeyRejected: true, geminiKey: true });
+    expect(h.props.geminiKey).toBe(dotted); // the saved key stays
+    expect(h.triggers).toHaveLength(1);
   });
 
   it('switching on again keeps the first day, so no old day is mailed', () => {
